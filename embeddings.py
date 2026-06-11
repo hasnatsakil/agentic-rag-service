@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import time
+# import time
 import structlog
 from openrouter_settings import RouterEmbeddingModel, client
 
@@ -15,7 +15,7 @@ class OpenRouterEmbeddingClient:
     MODEL: str = RouterEmbeddingModel.SMALL.value
 
     @classmethod
-    def embed_text(
+    def embed_query(
         cls, 
         text: str
         ) -> list[float]:
@@ -26,7 +26,7 @@ class OpenRouterEmbeddingClient:
         return response.data[0].embedding
 
     @classmethod
-    def embed_texts(
+    def embed_documents(
         cls, 
         texts: list[str]
         ) -> list[list[float]]:

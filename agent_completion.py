@@ -3,6 +3,7 @@ from openrouter_settings import RouterModel, RouterConfig, client
 from openai import ChatCompletion
 import time
 import structlog
+
 logger = structlog.get_logger(__name__)
 MODEL = RouterModel.MINIMAX25.value
 
