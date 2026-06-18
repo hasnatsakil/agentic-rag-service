@@ -25,11 +25,17 @@ After building an in-memory RAG pipeline in Week 2, I have completely overhauled
 ```
 test_rag/
 │
-├── CLI Entry Points
-│   ├── ingest_pdf.py         ← Script to chunk and store PDFs
-│   ├── pdf_chat_cli.py       ← Interactive RAG chat script
+├── Entry Points
+│   ├── api.py                ← FastAPI Web Application
+│   ├── ingest_pdf.py         ← CLI script to chunk and store PDFs
+│   ├── pdf_chat_cli.py       ← Interactive CLI RAG chat script
 │   ├── list_documents.py     ← View stored documents
 │   └── delete_document.py    ← Remove a document from the DB
+│
+├── API Routes (FastAPI APIRouter)
+│   ├── routes/health.py      ← Health status endpoint
+│   ├── routes/documents.py   ← Upload, list, and delete documents
+│   └── routes/chat.py        ← Context-retrieval chat queries
 │
 ├── Services & Core Logic
 │   ├── chat_service.py       ← Orchestrates retrieval and LLM generation
@@ -40,7 +46,10 @@ test_rag/
 │   ├── embeddings.py         ← OpenRouter embedding client
 │   └── vector_store.py       ← NeonDB / psycopg integration with pgvector
 │
-└── Configuration
+└── Configuration & Models
+    ├── config.py             ← App thresholds and settings
+    ├── schemas.py            ← Pydantic API schemas (validation)
+    ├── dependencies.py       ← FastAPI Dependency injection mapping
     ├── models.py             ← Data structures (RetrievalResult, etc.)
     └── openrouter_settings.py← API settings and LLM configuration
 ```
@@ -127,13 +136,72 @@ flowchart TD
     style M fill:#1b4332,color:#fff
 ```
 
+### Flow 3: FastAPI Web API Endpoints
+
+```mermaid
+flowchart TD
+    subgraph Client["HTTP Clients (Postman/Curl/Frontend)"]
+        C1["POST /documents/upload"]
+        C2["POST /chat/query"]
+    end
+
+    subgraph API["FastAPI Layer"]
+        R_DOC["routes/documents.py (upload_file)"]
+        R_CHAT["routes/chat.py (query_pdf)"]
+    end
+
+    subgraph DI["Dependency Injection"]
+        D1["dependencies.py"]
+    end
+
+    subgraph Services["Service Layer"]
+        IS["IngestService.ingest_pdf()"]
+        CS["ChatService.ask_pdf()"]
+    end
+
+    C1 --> R_DOC
+    C2 --> R_CHAT
+
+    R_DOC -.->|Depends| D1
+    R_CHAT -.->|Depends| D1
+    
+    D1 -->|Injects| IS
+    D1 -->|Injects| CS
+
+    IS -->|Returns IngestResult| R_DOC
+    CS -->|Returns ChatResult| R_CHAT
+
+    R_DOC -->|Returns UploadResponse| C1
+    R_CHAT -->|Returns QueryResponse| C2
+
+    style C1 fill:#2a9d8f,color:#fff
+    style C2 fill:#2a9d8f,color:#fff
+    style R_DOC fill:#264653,color:#fff
+    style R_CHAT fill:#264653,color:#fff
+    style IS fill:#e76f51,color:#fff
+    style CS fill:#e76f51,color:#fff
+```
+
+---
+
 ### File Dependency Map
 
 ```mermaid
-flowchart LR
-    subgraph CLI["CLI Entry Points"]
-        IP["ingest_pdf.py"]
-        PC["pdf_chat_cli.py"]
+flowchart TD
+    subgraph Entry["Entry Points"]
+        API["api.py (FastAPI App)"]
+        IP["ingest_pdf.py (CLI)"]
+        PC["pdf_chat_cli.py (CLI)"]
+    end
+
+    subgraph API_Routes["API Routes"]
+        RH["routes/health.py"]
+        RD["routes/documents.py"]
+        RC["routes/chat.py"]
+    end
+
+    subgraph Dependency["Dependency Injection"]
+        DEP["dependencies.py"]
     end
 
     subgraph Services["Service Layer"]
@@ -149,46 +217,63 @@ flowchart LR
         VS["vector_store.py"]
     end
 
-    subgraph Config["Config & Models"]
+    subgraph Config_Models["Config, Models & Schemas"]
+        CONF["config.py"]
+        SCH["schemas.py"]
         OR["openrouter_settings.py"]
         MD["models.py"]
     end
 
-    subgraph External["External Services"]
-        NE["Neon PostgreSQL\n+ pgvector"]
-        OA["OpenRouter API\n(embeddings + LLM)"]
+    subgraph External["External Infrastructure"]
+        NE["Neon PostgreSQL + pgvector"]
+        OA["OpenRouter API"]
     end
 
+    %% Routing Flow
+    API --> RH
+    API --> RD
+    API --> RC
+
+    %% Dependency Connections
+    RD -.-> DEP
+    RC -.-> DEP
+    DEP --> IS
+    DEP --> CS
+    DEP --> VS
+
+    %% CLI Connections
     IP --> IS
     PC --> CS
     PC --> VS
 
+    %% Service Connections
     IS --> DL
     IS --> CH
     IS --> RE
     IS --> VS
-    IS --> MD
-
+    
     CS --> EM
     CS --> RE
     CS --> VS
-    CS --> MD
 
+    %% Core Connections
     RE --> EM
     RE --> AC["agent_completion.py"]
-    RE --> MD
-
     EM --> OR
     AC --> OR
-    VS --> MD
-
-    OR --> OA
     VS --> NE
 
+    %% Configuration & Schema usage
+    RD & RC --> SCH
+    SCH --> CONF
+    VS & IS & CS & RE --> MD
+    OR & AC & EM --> OA
+
+    style API fill:#e76f51,color:#fff
     style IP fill:#2d6a4f,color:#fff
     style PC fill:#2d6a4f,color:#fff
     style NE fill:#264653,color:#fff
-    style OA fill:#e76f51,color:#fff
+    style OA fill:#264653,color:#fff
 ```
 
 ---
