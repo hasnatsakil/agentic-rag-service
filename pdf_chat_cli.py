@@ -16,8 +16,8 @@ def choose_document() -> int:
 
     print("Documents:")
 
-    for document_id, file_name, created_at in documents:
-        print(f"  {document_id}: {file_name} (created at {created_at})")
+    for doc in documents:
+        print(f"  {doc['id']}: {doc['file_name']} (created at {doc['created_at']})")
 
     document_id = int(input("\nChoose document id: "))
 

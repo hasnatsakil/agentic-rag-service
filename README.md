@@ -2,7 +2,7 @@
 
 This repository tracks my LLM engineering journey. **We are now on Week 3!**
 
-After building an in-memory RAG pipeline in Week 2, I have completely overhauled the architecture to use **Persistent Vector Storage (PostgreSQL + pgvector)** and **PDF Ingestion**.
+After building an in-memory RAG pipeline in Week 2, I have completely overhauled the architecture to use **Persistent Vector Storage (PostgreSQL + pgvector)**, **PDF Ingestion**, and exposed the entire pipeline via a **FastAPI REST API**.
 
 > Every piece of this system is written in pure Python without using LangChain or LlamaIndex to understand exactly what happens under the hood.
 
@@ -10,11 +10,13 @@ After building an in-memory RAG pipeline in Week 2, I have completely overhauled
 
 ## ✅ New Features in Week 3
 
+- **FastAPI REST API Layer**: Exposed the RAG pipeline via clean REST endpoints for document upload, deletion, listing, and querying.
+- **Pydantic Validation Schemas**: Added strong request/response schemas to validate inputs like similarity score threshold (`min_score`), retrieval limits (`search_k`, `answer_k`), and maximum character length.
+- **Dependency Injection**: Leveraged FastAPI dependencies to cleanly inject core database (`NeonVectorStore`) and query/ingest services.
 - **Persistent Vector Storage**: Migrated from in-memory arrays to a serverless Neon PostgreSQL database.
 - **pgvector Integration**: Offloaded Cosine Similarity search directly into SQL using the `<=>` operator.
 - **PDF Ingestion**: Added `pypdf` to load and extract text from PDFs, tracking exact page numbers for accurate citations.
-- **Modular Architecture**: Separated logic into distinct Service, Model, and Engine layers.
-- **Command Line Interfaces**: Created intuitive CLI tools to ingest documents and chat with them interactively.
+- **Modular CLI Tools**: Retained command-line options for ingesting and chatting if you prefer working directly in the terminal.
 
 ---
 
@@ -195,6 +197,8 @@ flowchart LR
 
 | Layer | Technology |
 |---|---|
+| API Framework | FastAPI (with Pydantic schemas) |
+| Web Server | Uvicorn |
 | LLM API | OpenRouter (`openrouter.ai`) |
 | Embeddings | `openai/text-embedding-3-small` via OpenRouter |
 | Vector DB | Neon Serverless PostgreSQL |
@@ -214,7 +218,7 @@ git clone https://github.com/hasnatsakil/pure-python-rag
 cd pure-python-rag
 python -m venv venv
 source venv/bin/activate
-pip install psycopg[binary] pypdf pydantic structlog python-dotenv openai
+pip install psycopg[binary] pypdf pydantic structlog python-dotenv openai fastapi uvicorn python-multipart
 ```
 
 ### 2. Configure Environment
@@ -227,12 +231,53 @@ DATABASE_URL=postgresql://user:password@ep-cool-db.region.aws.neon.tech/dbname
 
 ### 3. Usage
 
-**Step 1: Ingest a PDF**
+#### Option A: Running the FastAPI Web Server (New!)
+
+**Start the server:**
+```bash
+uvicorn api:app --reload
+```
+
+**Explore the API Docs:**
+Open `http://127.0.0.1:8000/docs` in your browser to access the interactive Swagger UI.
+
+**Example Endpoints:**
+* **Upload a PDF:**
+  ```bash
+  curl -X 'POST' \
+    'http://127.0.0.1:8000/documents/upload' \
+    -H 'accept: application/json' \
+    -H 'Content-Type: multipart/form-data' \
+    -F 'file=@sample.pdf;type=application/pdf'
+  ```
+* **List Documents:**
+  ```bash
+  curl -X 'GET' 'http://127.0.0.1:8000/documents'
+  ```
+* **Ask a Question:**
+  ```bash
+  curl -X 'POST' \
+    'http://127.0.0.1:8000/chat/query' \
+    -H 'accept: application/json' \
+    -H 'Content-Type: application/json' \
+    -d '{
+    "document_id": 1,
+    "question": "What is the main topic of this paper?",
+    "search_k": 15,
+    "answer_k": 5,
+    "min_score": 0.3,
+    "max_context_chars": 5000
+  }'
+  ```
+
+#### Option B: Terminal Command Line Interfaces
+
+**Ingest a PDF:**
 ```bash
 python ingest_pdf.py sample.pdf
 ```
 
-**Step 2: Chat with your PDF**
+**Chat with your PDF:**
 ```bash
 python pdf_chat_cli.py
 ```
@@ -241,11 +286,12 @@ python pdf_chat_cli.py
 
 ## 🔜 Next Phase
 
-- Adding a FastAPI backend to serve the RAG pipeline as a REST API.
 - Expanding vector search with hybrid search (BM25 + pgvector).
+- Building a modern frontend UI (Next.js / React) to chat with uploaded PDFs visually.
 
 ---
 
 ## 📜 License
 
 MIT
+

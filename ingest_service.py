@@ -10,9 +10,11 @@ from vector_store import NeonVectorStore
 class IngestService:
     @staticmethod
     def ingest_pdf(
-        file_path: str
+        file_path: str,
+        original_file_name: str | None = None
         ) -> IngestResult:
         path = Path(file_path)
+        file_name = original_file_name if original_file_name else path.name
 
         pages = DocumentLoader.load_pdf_pages(file_path)
 
@@ -33,7 +35,7 @@ class IngestService:
         
         embeddings = RAGEngine.embed_chunks(all_chunks)
 
-        document_id = NeonVectorStore.create_document(file_name = path.name)
+        document_id = NeonVectorStore.create_document(file_name = file_name)
 
         NeonVectorStore.insert_chunks(
         document_id = document_id,
@@ -44,7 +46,7 @@ class IngestService:
 
         return IngestResult(
             document_id=document_id,
-            file_name=path.name,
+            file_name=file_name,
             page_count=len(pages),
             chunk_count=len(all_chunks)
         )

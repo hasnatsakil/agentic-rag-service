@@ -1,6 +1,7 @@
 import os
 
 import psycopg
+from psycopg.rows import dict_row
 
 from dotenv import load_dotenv
 from models import RetrievalResult
@@ -163,9 +164,9 @@ class NeonVectorStore:
     @classmethod
     def list_documents(
         cls
-        ) -> list[tuple[int, str, str]]:
+        ) -> list[dict[str, object]]:
         with cls.connect() as connection:
-            with connection.cursor() as cursor:
+            with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
                     SELECT id, 
