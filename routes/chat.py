@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from chat_service import ChatService
+from services.chat_service import ChatService
 from dependencies import get_chat_service, get_vector_store
 from schemas import QueryRequest, QueryResponse
 

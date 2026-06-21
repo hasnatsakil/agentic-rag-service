@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # import time
 import structlog
-from openrouter_settings import RouterEmbeddingModel, client
+from config.openrouter_settings import RouterEmbeddingModel, client
 
 logger = structlog.get_logger(__name__)
 

@@ -4,7 +4,7 @@ import tempfile
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 
-from ingest_service import IngestService
+from services.ingest_service import IngestService
 from dependencies import get_ingest_service, get_vector_store
 from schemas import (
     UploadResponse,

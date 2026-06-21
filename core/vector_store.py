@@ -4,7 +4,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from dotenv import load_dotenv
-from models import RetrievalResult
+from core.models import RetrievalResult
 from pgvector.psycopg import register_vector
 
 load_dotenv()

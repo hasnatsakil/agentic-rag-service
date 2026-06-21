@@ -1,8 +1,8 @@
 import math
 
-from embeddings import OpenRouterEmbeddingClient
-from models import RetrievalResult
-from agent_completion import agent_complete
+from core.embeddings import OpenRouterEmbeddingClient
+from core.models import RetrievalResult
+from services.agent_completion import agent_complete
 
 class RAGEngine:
     TOP_K: int = 2

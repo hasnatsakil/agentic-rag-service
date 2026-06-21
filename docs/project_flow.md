@@ -130,14 +130,81 @@ flowchart TD
 
 ---
 
+## Flow 4: CrewAI Collaborative Team Flow
+
+```mermaid
+flowchart TD
+    A["scripts/crew_runner.py"] --> B["rag_crew.kickoff()"]
+
+    subgraph Crew["CrewAI Team Orcherstration"]
+        AG1["Document Retriever Agent"]
+        AG2["Answer Synthesizer Agent"]
+        AG3["Answer Verifier Agent"]
+        
+        T1["Task 1: Search PDF via custom RAG Tool"]
+        T2["Task 2: Grounded QA Synthesis"]
+        T3["Task 3: Fact Verification & Correction"]
+    end
+
+    B --> T1
+    AG1 -->|Executes| T1
+    T1 -->|Uses custom search_pdf tool| TL["crew/tools/rag_tool.py"]
+    TL -->|Queries| CS["ChatService().ask_pdf()"]
+    
+    T1 -->|Outputs Chunks| T2
+    AG2 -->|Executes| T2
+    
+    T2 -->|Outputs Draft Answer| T3
+    AG3 -->|Executes| T3
+    T3 -->|Context checks| T1
+    
+    T3 -->|Returns Grounded Answer| C["Final Output Answer"]
+
+    style A fill:#2d6a4f,color:#fff
+    style CS fill:#e76f51,color:#fff
+    style C fill:#1b4332,color:#fff
+    style TL fill:#264653,color:#fff
+```
+
+---
+
+## Flow 5: LangGraph Routing State Machine Flow
+
+```mermaid
+flowchart TD
+    A["graph/rag_graph.py (invoke)"] --> START["START"]
+    
+    START --> RET["retrieve_node"]
+    
+    RET -->|Calls OpenRouter Embeddings| EM["core/embeddings.py"]
+    RET -->|Queries similarity search| VS["core/vector_store.py"]
+    
+    VS --> RET_OUT["Filtered context chunks (score >= 0.3)"]
+    
+    RET_OUT --> COND{"check_context router"}
+    
+    COND -->|has_context == True| ANS["answer_node"]
+    COND -->|has_context == False| END1["END (Return: No relevant info)"]
+    
+    ANS -->|Calls generation| RE["core/rag_engine.py"]
+    RE --> END2["END (Return: Final Answer)"]
+
+    style A fill:#2d6a4f,color:#fff
+    style COND fill:#e76f51,color:#fff
+    style END1 fill:#9b2226,color:#fff
+    style END2 fill:#1b4332,color:#fff
+```
+
+---
+
 ## File Dependency Map
 
 ```mermaid
 flowchart TD
     subgraph Entry["Entry Points"]
         API["api.py (FastAPI App)"]
-        IP["ingest_pdf.py (CLI)"]
-        PC["pdf_chat_cli.py (CLI)"]
+        CR["scripts/crew_runner.py (CLI)"]
+        GR["graph/rag_graph.py (CLI)"]
     end
 
     subgraph API_Routes["API Routes"]
@@ -150,24 +217,30 @@ flowchart TD
         DEP["dependencies.py"]
     end
 
+    subgraph Agentic["Agentic Layers"]
+        CRW["crew/crews/rag_crew.py (CrewAI)"]
+        TL["crew/tools/rag_tool.py (RAG Tool)"]
+        LGP["graph/rag_graph.py (LangGraph)"]
+    end
+
     subgraph Services["Service Layer"]
-        IS["ingest_service.py"]
-        CS["chat_service.py"]
+        IS["services/ingest_service.py"]
+        CS["services/chat_service.py"]
     end
 
     subgraph Core["Core Logic"]
-        RE["rag_engine.py"]
-        CH["chunking.py"]
-        DL["document_loader.py"]
-        EM["embeddings.py"]
-        VS["vector_store.py"]
+        RE["core/rag_engine.py"]
+        CH["core/chunking.py"]
+        DL["core/document_loader.py"]
+        EM["core/embeddings.py"]
+        VS["core/vector_store.py"]
     end
 
     subgraph Config_Models["Config, Models & Schemas"]
-        CONF["config.py"]
+        CONF["config/__init__.py"]
         SCH["schemas.py"]
-        OR["openrouter_settings.py"]
-        MD["models.py"]
+        OR["config/openrouter_settings.py"]
+        MD["core/models.py"]
     end
 
     subgraph External["External Infrastructure"]
@@ -187,10 +260,14 @@ flowchart TD
     DEP --> CS
     DEP --> VS
 
-    %% CLI Connections
-    IP --> IS
-    PC --> CS
-    PC --> VS
+    %% CLI and Runners Connections
+    CR --> CRW
+    CRW --> TL
+    TL --> CS
+    GR --> LGP
+    LGP --> EM
+    LGP --> VS
+    LGP --> RE
 
     %% Service Connections
     IS --> DL
@@ -204,7 +281,7 @@ flowchart TD
 
     %% Core Connections
     RE --> EM
-    RE --> AC["agent_completion.py"]
+    RE --> AC["services/agent_completion.py"]
     EM --> OR
     AC --> OR
     VS --> NE
@@ -216,9 +293,10 @@ flowchart TD
     OR & AC & EM --> OA
 
     style API fill:#e76f51,color:#fff
-    style IP fill:#2d6a4f,color:#fff
-    style PC fill:#2d6a4f,color:#fff
+    style CR fill:#2d6a4f,color:#fff
+    style GR fill:#2d6a4f,color:#fff
     style NE fill:#264653,color:#fff
     style OA fill:#264653,color:#fff
 ```
+
 

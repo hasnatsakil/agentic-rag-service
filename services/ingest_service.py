@@ -1,11 +1,11 @@
 
 from pathlib import Path
 
-from chunking import RecursiveChunk
-from rag_engine import RAGEngine
-from document_loader import DocumentLoader
-from models import IngestResult
-from vector_store import NeonVectorStore
+from core.chunking import RecursiveChunk
+from core.rag_engine import RAGEngine
+from core.document_loader import DocumentLoader
+from core.models import IngestResult
+from core.vector_store import NeonVectorStore
 
 class IngestService:
     @staticmethod

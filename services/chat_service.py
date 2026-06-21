@@ -1,7 +1,7 @@
-from embeddings import OpenRouterEmbeddingClient
-from rag_engine import RAGEngine
-from vector_store import NeonVectorStore
-from models import ChatResult
+from core.embeddings import OpenRouterEmbeddingClient
+from core.rag_engine import RAGEngine
+from core.vector_store import NeonVectorStore
+from core.models import ChatResult
 
 class ChatService:
     @staticmethod

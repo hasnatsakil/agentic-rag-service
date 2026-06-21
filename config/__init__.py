@@ -1,4 +1,3 @@
-
 class Settings:
     search_k = 15
     answer_k = 5

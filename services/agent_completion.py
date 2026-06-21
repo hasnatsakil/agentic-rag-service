@@ -1,5 +1,5 @@
 from typing import List
-from openrouter_settings import RouterModel, RouterConfig, client
+from config.openrouter_settings import RouterModel, RouterConfig, client
 from openai import ChatCompletion
 import time
 import structlog
