@@ -82,7 +82,80 @@ test_rag/
 
 Detailed diagrams showing how data flows through the application:
 
-### 1. Web API Routing & Services
+### 1. Ingesting a PDF (API Flow)
+```mermaid
+flowchart TD
+    A["POST /documents/upload"] --> B["routes/documents.py (upload_file)"]
+    B --> C["IngestService.ingest_pdf()"]
+    
+    C --> D["DocumentLoader.load_pdf_pages()"]
+    D --> E["list of {page_number, text}"]
+    
+    E --> F["RecursiveChunk.chunk() per page"]
+    F --> F1{"Paragraph fits?"}
+    F1 -- Yes --> F2["Keep as chunk"]
+    F1 -- No --> F3{"Sentence fits?"}
+    F3 -- Yes --> F4["Keep as chunk"]
+    F3 -- No --> F5["chunk_by_words(max_words=40, overlap=5)"]
+    
+    F2 & F4 & F5 --> G["all_chunks + page_numbers"]
+    
+    G --> H["RAGEngine.embed_chunks()"]
+    H --> H1["OpenRouterEmbeddingClient.embed_documents()"]
+    H1 --> H2["OpenRouter API → embedding vectors"]
+    
+    H2 --> I["NeonVectorStore.create_document()"]
+    I --> I1["INSERT INTO documents → document_id"]
+    
+    I1 --> J["NeonVectorStore.insert_chunks()"]
+    J --> J1["INSERT INTO document_chunks\n(document_id, chunk_index, chunk_text, embedding, page_number)"]
+    
+    J1 --> K["Returns IngestResult\n(document_id, file_name, page_count, chunk_count)"]
+
+    style A fill:#2a9d8f,color:#fff
+    style B fill:#264653,color:#fff
+    style K fill:#1b4332,color:#fff
+    style H2 fill:#e76f51,color:#fff
+    style I1 fill:#264653,color:#fff
+    style J1 fill:#264653,color:#fff
+```
+
+### 2. Chatting with a PDF (API Query Flow)
+```mermaid
+flowchart TD
+    A["POST /chat/query"] --> B["routes/chat.py (query_pdf)"]
+    B --> C["ChatService.ask_pdf()"]
+    
+    C --> D["OpenRouterEmbeddingClient.embed_query()"]
+    D --> D1["OpenRouter API → query vector"]
+    
+    D1 --> E["NeonVectorStore.similarity_search()"]
+    E --> E1["pgvector cosine distance query\nFILTERED by document_id\nLIMIT search_k=8"]
+    E1 --> E2["list of RetrievalResult\n(score, chunk_id, chunk_text, page_number)"]
+    
+    E2 --> F{"Any score >= min_score 0.3?"}
+    F -- No --> F1["Return: not enough context"]
+    F -- Yes --> G["Take top answer_k=3 chunks\nwithin max_context_chars=3000"]
+    
+    G --> H["RAGEngine.build_context()\nFormat: [Page X, Chunk Y]\nchunk_text..."]
+    
+    H --> I["RAGEngine.generate_answer()"]
+    I --> I1["agent_complete() → OpenRouter LLM API"]
+    I1 --> I2["LLM answers from context only"]
+    
+    I2 --> J["Returns ChatResult\n(answer, sources)"]
+    J --> K["routes/chat.py returns QueryResponse JSON"]
+
+    style A fill:#2a9d8f,color:#fff
+    style B fill:#264653,color:#fff
+    style F1 fill:#9b2226,color:#fff
+    style D1 fill:#e76f51,color:#fff
+    style E1 fill:#264653,color:#fff
+    style I1 fill:#e76f51,color:#fff
+    style J fill:#1b4332,color:#fff
+```
+
+### 3. Web API Routing & Services
 ```mermaid
 flowchart TD
     subgraph Client["HTTP Clients (Postman/Curl/Frontend)"]
@@ -127,7 +200,7 @@ flowchart TD
     style CS fill:#e76f51,color:#fff
 ```
 
-### 2. CrewAI Collaborative Team Flow
+### 4. CrewAI Collaborative Team Flow
 ```mermaid
 flowchart TD
     A["scripts/crew_runner.py"] --> B["rag_crew.kickoff()"]
@@ -162,7 +235,7 @@ flowchart TD
     style TL fill:#264653,color:#fff
 ```
 
-### 3. LangGraph Routing State Machine Flow
+### 5. LangGraph Routing State Machine Flow
 ```mermaid
 flowchart TD
     A["graph/rag_graph.py (invoke)"] --> START["START"]
@@ -187,6 +260,7 @@ flowchart TD
     style END1 fill:#9b2226,color:#fff
     style END2 fill:#1b4332,color:#fff
 ```
+
 
 ---
 

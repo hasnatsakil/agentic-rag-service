@@ -1,84 +1,82 @@
 # RAG Project — Code Flow Visual
 
-## Flow 1: Ingesting a PDF
+## Flow 1: Ingesting a PDF (API)
 
 ```mermaid
 flowchart TD
-    A["python ingest_pdf.py sample.pdf"] --> B["IngestService.ingest_pdf()"]
+    A["POST /documents/upload"] --> B["routes/documents.py (upload_file)"]
+    B --> C["IngestService.ingest_pdf()"]
     
-    B --> C["DocumentLoader.load_pdf_pages()"]
-    C --> D["list of {page_number, text}"]
+    C --> D["DocumentLoader.load_pdf_pages()"]
+    D --> E["list of {page_number, text}"]
     
-    D --> E["RecursiveChunk.chunk() per page"]
-    E --> E1{"Paragraph fits?"}
-    E1 -- Yes --> E2["Keep as chunk"]
-    E1 -- No --> E3{"Sentence fits?"}
-    E3 -- Yes --> E4["Keep as chunk"]
-    E3 -- No --> E5["chunk_by_words(max_words=40, overlap=5)"]
+    E --> F["RecursiveChunk.chunk() per page"]
+    F --> F1{"Paragraph fits?"}
+    F1 -- Yes --> F2["Keep as chunk"]
+    F1 -- No --> F3{"Sentence fits?"}
+    F3 -- Yes --> F4["Keep as chunk"]
+    F3 -- No --> F5["chunk_by_words(max_words=40, overlap=5)"]
     
-    E2 & E4 & E5 --> F["all_chunks + page_numbers"]
+    F2 & F4 & F5 --> G["all_chunks + page_numbers"]
     
-    F --> G["RAGEngine.embed_chunks()"]
-    G --> G1["OpenRouterEmbeddingClient.embed_documents()"]
-    G1 --> G2["OpenRouter API → embedding vectors"]
+    G --> H["RAGEngine.embed_chunks()"]
+    H --> H1["OpenRouterEmbeddingClient.embed_documents()"]
+    H1 --> H2["OpenRouter API → embedding vectors"]
     
-    G2 --> H["NeonVectorStore.create_document()"]
-    H --> H1["INSERT INTO documents → document_id"]
+    H2 --> I["NeonVectorStore.create_document()"]
+    I --> I1["INSERT INTO documents → document_id"]
     
-    H1 --> I["NeonVectorStore.insert_chunks()"]
-    I --> I1["INSERT INTO document_chunks\n(document_id, chunk_index, chunk_text, embedding, page_number)"]
+    I1 --> J["NeonVectorStore.insert_chunks()"]
+    J --> J1["INSERT INTO document_chunks\n(document_id, chunk_index, chunk_text, embedding, page_number)"]
     
-    I1 --> J["Returns IngestResult\n(document_id, file_name, page_count, chunk_count)"]
+    J1 --> K["Returns IngestResult\n(document_id, file_name, page_count, chunk_count)"]
 
-    style A fill:#2d6a4f,color:#fff
-    style J fill:#1b4332,color:#fff
-    style G2 fill:#e76f51,color:#fff
-    style H1 fill:#264653,color:#fff
+    style A fill:#2a9d8f,color:#fff
+    style B fill:#264653,color:#fff
+    style K fill:#1b4332,color:#fff
+    style H2 fill:#e76f51,color:#fff
     style I1 fill:#264653,color:#fff
+    style J1 fill:#264653,color:#fff
 ```
 
 ---
 
-## Flow 2: Chatting with a PDF
+## Flow 2: Chatting with a PDF (API Query)
 
 ```mermaid
 flowchart TD
-    A["python pdf_chat_cli.py"] --> B["NeonVectorStore.list_documents()"]
-    B --> C["User picks document_id"]
-    C --> D["User types question"]
+    A["POST /chat/query"] --> B["routes/chat.py (query_pdf)"]
+    B --> C["ChatService.ask_pdf()"]
     
-    D --> E["ChatService.ask_pdf()"]
+    C --> D["OpenRouterEmbeddingClient.embed_query()"]
+    D --> D1["OpenRouter API → query vector"]
     
-    E --> F["OpenRouterEmbeddingClient.embed_query()"]
-    F --> F1["OpenRouter API → query vector"]
+    D1 --> E["NeonVectorStore.similarity_search()"]
+    E --> E1["pgvector cosine distance query\nFILTERED by document_id\nLIMIT search_k=8"]
+    E1 --> E2["list of RetrievalResult\n(score, chunk_id, chunk_text, page_number)"]
     
-    F1 --> G["NeonVectorStore.similarity_search()"]
-    G --> G1["pgvector cosine distance query\nFILTERED by document_id\nLIMIT search_k=8"]
-    G1 --> G2["list of RetrievalResult\n(score, chunk_id, chunk_text, page_number)"]
+    E2 --> F{"Any score >= min_score 0.3?"}
+    F -- No --> F1["Return: not enough context"]
+    F -- Yes --> G["Take top answer_k=3 chunks\nwithin max_context_chars=3000"]
     
-    G2 --> H["print_retrieval_debug()\n✓ PASS / ✗ FAIL per chunk"]
+    G --> H["RAGEngine.build_context()\nFormat: [Page X, Chunk Y]\nchunk_text..."]
     
-    H --> I{"Any score >= min_score 0.3?"}
-    I -- No --> I1["Return: not enough context"]
-    I -- Yes --> J["Take top answer_k=3 chunks\nwithin max_context_chars=3000"]
+    H --> I["RAGEngine.generate_answer()"]
+    I --> I1["agent_complete() → OpenRouter LLM API"]
+    I1 --> I2["LLM answers from context only"]
     
-    J --> K["RAGEngine.build_context()\nFormat: [Page X, Chunk Y]\nchunk_text..."]
-    
-    K --> L["RAGEngine.generate_answer()"]
-    L --> L1["agent_complete() → OpenRouter LLM API"]
-    L1 --> L2["LLM answers from context only"]
-    
-    L2 --> M["Returns ChatResult\n(answer, sources)"]
-    M --> N["Print answer + source labels"]
-    N --> D
+    I2 --> J["Returns ChatResult\n(answer, sources)"]
+    J --> K["routes/chat.py returns QueryResponse JSON"]
 
-    style A fill:#2d6a4f,color:#fff
-    style I1 fill:#9b2226,color:#fff
-    style F1 fill:#e76f51,color:#fff
-    style G1 fill:#264653,color:#fff
-    style L1 fill:#e76f51,color:#fff
-    style M fill:#1b4332,color:#fff
+    style A fill:#2a9d8f,color:#fff
+    style B fill:#264653,color:#fff
+    style F1 fill:#9b2226,color:#fff
+    style D1 fill:#e76f51,color:#fff
+    style E1 fill:#264653,color:#fff
+    style I1 fill:#e76f51,color:#fff
+    style J fill:#1b4332,color:#fff
 ```
+
 
 ---
 
