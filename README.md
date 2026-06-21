@@ -1,3 +1,5 @@
+## 🚀 Live Demo
+API Docs: https://agentic-rag-service.onrender.com/docs
 # 🤖 Agentic RAG Service — Custom RAG with FastAPI, CrewAI, & LangGraph
 
 This repository contains a modular, production-ready **Agentic RAG Service** built from scratch in Python. It progresses from basic vector retrieval to a robust web API, stateful routing, and multi-agent validation.
