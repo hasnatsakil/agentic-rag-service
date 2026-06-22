@@ -1,5 +1,6 @@
 ## 🚀 Live Demo
 API Docs: https://agentic-rag-service.onrender.com/docs
+
 # 🤖 Agentic RAG Service — Custom RAG with FastAPI, CrewAI, & LangGraph
 
 This repository contains a modular, production-ready **Agentic RAG Service** built from scratch in Python. It progresses from basic vector retrieval to a robust web API, stateful routing, and multi-agent validation.
@@ -330,6 +331,50 @@ python scripts/crew_runner.py
 ```bash
 python graph/rag_graph.py
 ```
+
+---
+
+## 🔌 API Reference
+
+You can interact with the RAG backend in two ways: using the visual interactive UI, or programmatically via code.
+
+### Method 1: Interactive UI (Swagger)
+FastAPI automatically generates a visual dashboard where you can click **"Try it out"** to upload files and send queries directly from your browser.
+👉 **Go to:** `http://127.0.0.1:8000/docs` (or your live Render URL `/docs`)
+
+### Method 2: Programmatic API (Usage Example)
+You can call the endpoints from any frontend (React, Flutter) or script using standard HTTP requests. 
+
+**Usage example (Python `requests`):**
+```python
+import requests
+
+BASE_URL = "https://your-render-url.com" # or http://127.0.0.1:8000
+
+# 1. Upload a PDF
+with open("sample.pdf", "rb") as f:
+    upload_res = requests.post(f"{BASE_URL}/documents/upload", files={"file": f})
+    
+document_id = upload_res.json()["document_id"]
+print(f"Uploaded successfully. Document ID: {document_id}")
+
+# 2. Ask a question about the PDF
+payload = {
+    "document_id": document_id,
+    "question": "What is the main conclusion of this document?"
+}
+chat_res = requests.post(f"{BASE_URL}/chat/query", json=payload)
+
+print("\n--- Answer ---")
+print(chat_res.json()["answer"])
+```
+
+### Available Endpoints
+* **`POST /documents/upload`** — Uploads and vectorizes a `.pdf` file.
+* **`GET /documents`** — Lists all indexed documents.
+* **`DELETE /documents/{document_id}`** — Removes a document and its vectors.
+* **`POST /chat/query`** — Performs similarity search and generates an LLM answer.
+* **`GET /health`** — Pinger endpoint to check server status.
 
 ---
 
