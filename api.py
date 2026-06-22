@@ -15,6 +15,10 @@ app.include_router(health_router)
 app.include_router(documents_router)
 app.include_router(chat_router)
 
+@app.head("/")
+def head_root():
+    return Response(status_code=200)
+
 @app.get("/")
 def root():
     return {
