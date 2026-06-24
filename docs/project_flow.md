@@ -24,12 +24,12 @@ flowchart TD
     H1 --> H2["OpenRouter API → embedding vectors"]
     
     H2 --> I["NeonVectorStore.create_document()"]
-    I --> I1["INSERT INTO documents → document_id"]
+    I --> I1["INSERT INTO documents → DOCUMENT_ID"]
     
     I1 --> J["NeonVectorStore.insert_chunks()"]
-    J --> J1["INSERT INTO document_chunks\n(document_id, chunk_index, chunk_text, embedding, page_number)"]
+    J --> J1["INSERT INTO document_chunks\n(DOCUMENT_ID, chunk_index, chunk_text, embedding, page_number)"]
     
-    J1 --> K["Returns IngestResult\n(document_id, file_name, page_count, chunk_count)"]
+    J1 --> K["Returns IngestResult\n(DOCUMENT_ID, file_name, page_count, chunk_count)"]
 
     style A fill:#2a9d8f,color:#fff
     style B fill:#264653,color:#fff
@@ -52,12 +52,12 @@ flowchart TD
     D --> D1["OpenRouter API → query vector"]
     
     D1 --> E["NeonVectorStore.similarity_search()"]
-    E --> E1["pgvector cosine distance query\nFILTERED by document_id\nLIMIT search_k=8"]
+    E --> E1["pgvector cosine distance query\nFILTERED by DOCUMENT_ID\nLIMIT SEARCH_K=8"]
     E1 --> E2["list of RetrievalResult\n(score, chunk_id, chunk_text, page_number)"]
     
-    E2 --> F{"Any score >= min_score 0.3?"}
+    E2 --> F{"Any score >= MIN_SCORE 0.3?"}
     F -- No --> F1["Return: not enough context"]
-    F -- Yes --> G["Take top answer_k=3 chunks\nwithin max_context_chars=3000"]
+    F -- Yes --> G["Take top ANSWER_K=3 chunks\nwithin MAX_CONTEXT_CHARS=3000"]
     
     G --> H["RAGEngine.build_context()\nFormat: [Page X, Chunk Y]\nchunk_text..."]
     
@@ -166,31 +166,38 @@ flowchart TD
 
 ---
 
-## Flow 5: LangGraph Routing State Machine Flow
+## Flow 5: LangGraph Self-Correcting Flow (Level 9)
 
 ```mermaid
 flowchart TD
     A["graph/rag_graph.py (invoke)"] --> START["START"]
-    
+
     START --> RET["retrieve_node"]
-    
-    RET -->|Calls OpenRouter Embeddings| EM["core/embeddings.py"]
-    RET -->|Queries similarity search| VS["core/vector_store.py"]
-    
-    VS --> RET_OUT["Filtered context chunks (score >= 0.3)"]
-    
-    RET_OUT --> COND{"check_context router"}
-    
-    COND -->|has_context == True| ANS["answer_node"]
-    COND -->|has_context == False| END1["END (Return: No relevant info)"]
-    
-    ANS -->|Calls generation| RE["core/rag_engine.py"]
-    RE --> END2["END (Return: Final Answer)"]
+
+    RET --> GRADE["grade_documents_node\n(LLM grades context)"]
+    GRADE --> COND1{"route_after_grading"}
+
+    COND1 -->|has_context| SEL["select_context_node"]
+    COND1 -->|retry_count < max| REW["rewrite_query_node\n(Expands search)"]
+    COND1 -->|no retries left| NO_CTX["no_context_node"]
+
+    REW --> RET
+
+    SEL --> COND2{"route_after_select"}
+    COND2 -->|has_context| ANS["answer_node\n(LLM drafts answer)"]
+    COND2 -->|no_context| NO_CTX
+
+    ANS --> HALLUC["check_hallucination_node\n(LLM verifies factuality)"]
+
+    HALLUC --> END1["END (Return: Verified Answer)"]
+    NO_CTX --> END2["END (Return: No relevant info)"]
 
     style A fill:#2d6a4f,color:#fff
-    style COND fill:#e76f51,color:#fff
-    style END1 fill:#9b2226,color:#fff
-    style END2 fill:#1b4332,color:#fff
+    style GRADE fill:#e76f51,color:#fff
+    style REW fill:#e76f51,color:#fff
+    style HALLUC fill:#e76f51,color:#fff
+    style END1 fill:#1b4332,color:#fff
+    style END2 fill:#9b2226,color:#fff
 ```
 
 ---

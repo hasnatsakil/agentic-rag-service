@@ -16,6 +16,7 @@ router = APIRouter(
     prefix="/documents",
     tags=["Documents"]
 )
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_file(
@@ -32,7 +33,12 @@ async def upload_file(
             status_code=400,
             detail="Only PDF files are allowed right now."
         )
-    
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum file size is {MAX_FILE_SIZE / (1024 * 1024)} MB."
+        )
     # Some FastAPI/Starlette versions may not always provide file.size.
     # So we use a safer file-size check.
     file.file.seek(0, 2)  # Move to end of file
@@ -61,8 +67,8 @@ async def upload_file(
         )
         return {
             "message": "File Uploaded and Ingested Successfully",
-            "document_id": result.document_id,
-            "query_hint": f"Use document_id {result.document_id} to query",
+            "DOCUMENT_ID": result.DOCUMENT_ID,
+            "query_hint": f"Use DOCUMENT_ID {result.DOCUMENT_ID} to query",
             "file_name": result.file_name,
             "page_count": result.page_count,
             "chunk_count": result.chunk_count,
@@ -100,25 +106,25 @@ def list_documents(
             detail=f"Failed to list documents: {str(e)}"
         )
     
-@router.delete("/{document_id}", response_model=DeleteDocumentResponse)
+@router.delete("/{DOCUMENT_ID}", response_model=DeleteDocumentResponse)
 def delete_document(
-    document_id: int,
+    DOCUMENT_ID: int,
     vector_store = Depends(get_vector_store),
     ):
     try:
         documents = vector_store.list_documents()
         doc_ids = {doc["id"] for doc in documents}
 
-        if document_id not in doc_ids:
+        if DOCUMENT_ID not in doc_ids:
             raise HTTPException(
                 status_code=404,
-                detail = f"Document not found with id {document_id}."
+                detail = f"Document not found with id {DOCUMENT_ID}."
             )
-        vector_store.delete_document(document_id)
+        vector_store.delete_document(DOCUMENT_ID)
 
         return {
             "message": "Document deleted successfully",
-            "document_id": document_id
+            "DOCUMENT_ID": DOCUMENT_ID
         }
     except HTTPException:
         raise

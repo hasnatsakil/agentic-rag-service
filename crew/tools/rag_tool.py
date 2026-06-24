@@ -6,7 +6,8 @@ sys.path.insert(
 )
 
 from crewai.tools import tool
-from services.chat_service import ChatService
+from services.graph_services import GraphService
+from config import settings
 
 @tool("Search PDF Documents")
 def search_pdf(
@@ -19,15 +20,15 @@ def search_pdf(
     Input must be a clear search query string.
     Returns relevant text chunks from the documents.
     """
-    document_id = 1
-
-    result = ChatService().ask_pdf(
+    
+    
+    result = GraphService.ask_pdf_with_graph(
         question = query,
-        document_id = document_id,
-        search_k = 8,
-        answer_k = 5,
-        min_score = 0.3,
-        max_context_chars = 4000
+        DOCUMENT_ID = settings.DOCUMENT_ID,
+        SEARCH_K = settings.SEARCH_K,
+        ANSWER_K = settings.ANSWER_K,
+        MIN_SCORE = settings.MIN_SCORE,
+        MAX_CONTEXT_CHARS = settings.MAX_CONTEXT_CHARS
     )
 
     if not result.sources:

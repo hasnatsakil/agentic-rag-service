@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from config import settings
 
 class QueryRequest(BaseModel):
-    document_id: int = Field(
+    DOCUMENT_ID: int = Field(
         ..., 
         description="The ID of the document to query"
         )
@@ -11,20 +11,20 @@ class QueryRequest(BaseModel):
         ...,
         description="Question to ask about the document"
         )
-    search_k: int = Field(
-        settings.search_k,
+    SEARCH_K: int = Field(
+        settings.SEARCH_K,
         description="Number of chunks to retrieve from vector store for context"
         )
-    answer_k: int = Field(
-        settings.answer_k,
+    ANSWER_K: int = Field(
+        settings.ANSWER_K,
         description="Number of chunks sent to LLM"
         )
-    min_score: float = Field(
-        settings.min_score,
+    MIN_SCORE: float = Field(
+        settings.MIN_SCORE,
         description="Minimum cosine similarity score"
         )
-    max_context_chars: int = Field(
-        settings.max_context_chars,
+    MAX_CONTEXT_CHARS: int = Field(
+        settings.MAX_CONTEXT_CHARS,
         description="Maximum total characters of context to send to LLM"
     )
 
@@ -34,7 +34,7 @@ class HealthResponse(BaseModel):
 
 class UploadResponse(BaseModel):
     message: str
-    document_id: int
+    DOCUMENT_ID: int
     file_name: str
     page_count: int
     chunk_count: int
@@ -49,6 +49,7 @@ class SourceResponse(BaseModel):
 class QueryResponse(BaseModel):
     answer: str
     sources: list[SourceResponse]
+    process_time_ms:float
 
 class DocumentResponse(BaseModel):
     id: int
@@ -60,4 +61,4 @@ class DocumentsListResponse(BaseModel):
 
 class DeleteDocumentResponse(BaseModel):
     message: str
-    document_id: int
+    DOCUMENT_ID: int

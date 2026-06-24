@@ -31,6 +31,9 @@ class RouterEmbeddingModel(Enum):
     SMALL = "openai/text-embedding-3-small"
     LARGE = "openai/text-embedding-3-large"
 
+class RouterGradingModel(Enum):
+    GEMMA4 = "google/gemma-4-31b-it:free"
+
 
 class RouterConfig:
     FALLBACK = True

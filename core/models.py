@@ -18,7 +18,7 @@ class RetrievalResult:
 
 @dataclass
 class IngestResult:
-    document_id: int
+    DOCUMENT_ID: int
     file_name: str
     page_count: int
     chunk_count: int

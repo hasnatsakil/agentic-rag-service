@@ -104,14 +104,14 @@ class RAGEngine:
     def print_retrieval_debug(
         cls, 
         top_results : list[RetrievalResult],
-        min_score: float | None = None,
+        MIN_SCORE: float | None = None,
         ) -> None:
-        threshold_label = f" (threshold: {min_score})" if min_score is not None else ""
+        threshold_label = f" (threshold: {MIN_SCORE})" if MIN_SCORE is not None else ""
         print(f"\n── Retrieval Debug{threshold_label} ──────────────────────")
 
         for result in top_results:
-            if min_score is not None:
-                status = "✓ PASS" if result.score >= min_score else "✗ FAIL"
+            if MIN_SCORE is not None:
+                status = "✓ PASS" if result.score >= MIN_SCORE else "✗ FAIL"
                 print(f"  [{status}] {result.label()}, Score: {result.score:.4f}")
             else:
                 print(f"  {result.label()}, Score: {result.score:.4f}")

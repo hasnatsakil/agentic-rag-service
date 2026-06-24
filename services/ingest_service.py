@@ -35,17 +35,17 @@ class IngestService:
         
         embeddings = RAGEngine.embed_chunks(all_chunks)
 
-        document_id = NeonVectorStore.create_document(file_name = file_name)
+        DOCUMENT_ID = NeonVectorStore.create_document(file_name = file_name)
 
         NeonVectorStore.insert_chunks(
-        document_id = document_id,
+        DOCUMENT_ID = DOCUMENT_ID,
         chunks = all_chunks,
         embeddings = embeddings,
         page_numbers = page_numbers
         )
 
         return IngestResult(
-            document_id=document_id,
+            DOCUMENT_ID=DOCUMENT_ID,
             file_name=file_name,
             page_count=len(pages),
             chunk_count=len(all_chunks)

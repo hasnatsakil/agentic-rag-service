@@ -52,14 +52,14 @@ class NeonVectorStore:
                     """,
                     (file_name,),
                 )
-                document_id = cursor.fetchone()[0]
+                DOCUMENT_ID = cursor.fetchone()[0]
 
-        return document_id
+        return DOCUMENT_ID
     
     @classmethod
     def insert_chunks(
         cls,
-        document_id: int,
+        DOCUMENT_ID: int,
         chunks: list[str],
         embeddings: list[list[float]],
         page_numbers: list[int] | None = None
@@ -74,7 +74,7 @@ class NeonVectorStore:
         for chunk_index, chunk_text in enumerate(chunks):
             rows.append(
                 (
-                    document_id, 
+                    DOCUMENT_ID, 
                     chunk_index, 
                     chunk_text, 
                     embeddings[chunk_index],
@@ -87,7 +87,7 @@ class NeonVectorStore:
                 cursor.executemany(
                         """
                         INSERT INTO document_chunks (
-                        document_id,
+                        DOCUMENT_ID,
                         chunk_index, 
                         chunk_text, 
                         embedding,
@@ -102,12 +102,12 @@ class NeonVectorStore:
         cls,
         query_embedding: list[float],
         top_k: int = 3,
-        document_id: int | None = None
+        DOCUMENT_ID: int | None = None
         ) -> list[RetrievalResult]:
 
         with cls.connect() as connection:
             with connection.cursor() as cursor:
-                if document_id is None:
+                if DOCUMENT_ID is None:
                     cursor.execute(
                         """
                         SELECT
@@ -134,13 +134,13 @@ class NeonVectorStore:
                             chunk_text,
                             page_number
                         FROM document_chunks
-                        WHERE document_id = %s
+                        WHERE DOCUMENT_ID = %s
                         ORDER BY embedding <=> %s::vector
                         LIMIT %s;
                         """,
                         (
                             query_embedding,
-                            document_id,
+                            DOCUMENT_ID,
                             query_embedding,
                             top_k
                         ),
@@ -183,7 +183,7 @@ class NeonVectorStore:
     @classmethod
     def delete_document(
         cls,
-        document_id: int
+        DOCUMENT_ID: int
         ) -> None:
         with cls.connect() as connection:
             with connection.cursor() as cursor:
@@ -192,6 +192,6 @@ class NeonVectorStore:
                     DELETE FROM documents
                     WHERE id = %s;
                     """,
-                    (document_id,)
+                    (DOCUMENT_ID,)
                 )
   

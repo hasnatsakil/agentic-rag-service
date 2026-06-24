@@ -1,7 +1,8 @@
 class Settings:
-    search_k = 15
-    answer_k = 5
-    min_score = 0.3
-    max_context_chars = 5000
+    SEARCH_K = 15
+    ANSWER_K = 5
+    MIN_SCORE = 0.3
+    MAX_CONTEXT_CHARS = 5000
+    DOCUMENT_ID = 2  # Default document ID for testing purposes
 
 settings = Settings()
