@@ -1,7 +1,7 @@
 ## 🚀 Live Demo
 API Docs: https://agentic-rag-service.onrender.com/docs
 
-# 🤖 Agentic RAG Service — Custom RAG with FastAPI, CrewAI, & LangGraph
+# 🤖 Agentic RAG Service — Custom RAG with FastAPI, CrewAI(CLI Only), & LangGraph
 
 This repository contains a modular, production-ready **Agentic RAG Service** built from scratch in Python. It progresses from basic vector retrieval to a robust web API, stateful routing, and multi-agent validation.
 
@@ -43,7 +43,7 @@ test_rag/
 ├── services/
 │   ├── __init__.py           
 │   ├── agent_completion.py   ← OpenRouter API completion caller
-│   ├── chat_service.py       ← Standard context search & generate service
+│   ├── graph_services.py     ← Service wrapper for query execution via LangGraph
 │   └── ingest_service.py     ← PDF loading, chunking, embedding & vector database insertion
 │
 ├── core/
@@ -123,38 +123,21 @@ flowchart TD
     style J1 fill:#264653,color:#fff
 ```
 
-### 2. Chatting with a PDF (API Query Flow)
+### 2. Chatting with a PDF (API Query Flow via LangGraph)
 ```mermaid
 flowchart TD
-    A["POST /chat/query"] --> B["routes/chat.py (query_pdf)"]
-    B --> C["ChatService.ask_pdf()"]
+    A["POST /chat/query"] --> B["routes/chat.py (query_pdf_graph)"]
+    B --> C["GraphService.ask_pdf_with_graph()"]
     
-    C --> D["OpenRouterEmbeddingClient.embed_query()"]
-    D --> D1["OpenRouter API → query vector"]
-    
-    D1 --> E["NeonVectorStore.similarity_search()"]
-    E --> E1["pgvector cosine distance query\nFILTERED by DOCUMENT_ID\nLIMIT SEARCH_K=8"]
-    E1 --> E2["list of RetrievalResult\n(score, chunk_id, chunk_text, page_number)"]
-    
-    E2 --> F{"Any score >= MIN_SCORE 0.3?"}
-    F -- No --> F1["Return: not enough context"]
-    F -- Yes --> G["Take top ANSWER_K=3 chunks\nwithin MAX_CONTEXT_CHARS=3000"]
-    
-    G --> H["RAGEngine.build_context()\nFormat: [Page X, Chunk Y]\nchunk_text..."]
-    
-    H --> I["RAGEngine.generate_answer()"]
-    I --> I1["agent_complete() → OpenRouter LLM API"]
-    I1 --> I2["LLM answers from context only"]
-    
-    I2 --> J["Returns ChatResult\n(answer, sources)"]
+    C --> D["rag_graph.invoke()"]
+    D --> E["Retrieve Node → Grade Node → Answer Node"]
+    E --> J["Returns ChatResult\n(answer, sources)"]
     J --> K["routes/chat.py returns QueryResponse JSON"]
 
     style A fill:#2a9d8f,color:#fff
     style B fill:#264653,color:#fff
-    style F1 fill:#9b2226,color:#fff
-    style D1 fill:#e76f51,color:#fff
-    style E1 fill:#264653,color:#fff
-    style I1 fill:#e76f51,color:#fff
+    style D fill:#e76f51,color:#fff
+    style E fill:#264653,color:#fff
     style J fill:#1b4332,color:#fff
 ```
 
@@ -168,7 +151,7 @@ flowchart TD
 
     subgraph API["FastAPI Layer"]
         R_DOC["routes/documents.py (upload_file)"]
-        R_CHAT["routes/chat.py (query_pdf)"]
+        R_CHAT["routes/chat.py (query_pdf_graph)"]
     end
 
     subgraph DI["Dependency Injection"]
@@ -177,20 +160,19 @@ flowchart TD
 
     subgraph Services["Service Layer"]
         IS["IngestService.ingest_pdf()"]
-        CS["ChatService.ask_pdf()"]
+        GS["GraphService.ask_pdf_with_graph()"]
     end
 
     C1 --> R_DOC
     C2 --> R_CHAT
 
     R_DOC -.->|Depends| D1
-    R_CHAT -.->|Depends| D1
     
     D1 -->|Injects| IS
-    D1 -->|Injects| CS
 
     IS -->|Returns IngestResult| R_DOC
-    CS -->|Returns ChatResult| R_CHAT
+    R_CHAT -->|Calls directly| GS
+    GS -->|Returns ChatResult| R_CHAT
 
     R_DOC -->|Returns UploadResponse| C1
     R_CHAT -->|Returns QueryResponse| C2
@@ -200,7 +182,7 @@ flowchart TD
     style R_DOC fill:#264653,color:#fff
     style R_CHAT fill:#264653,color:#fff
     style IS fill:#e76f51,color:#fff
-    style CS fill:#e76f51,color:#fff
+    style GS fill:#e76f51,color:#fff
 ```
 
 ### 4. CrewAI Collaborative Team Flow
@@ -221,7 +203,7 @@ flowchart TD
     B --> T1
     AG1 -->|Executes| T1
     T1 -->|Uses custom search_pdf tool| TL["crew/tools/rag_tool.py"]
-    TL -->|Queries| CS["ChatService().ask_pdf()"]
+    TL -->|Queries| GS["GraphService.ask_pdf_with_graph()"]
     
     T1 -->|Outputs Chunks| T2
     AG2 -->|Executes| T2
@@ -233,7 +215,7 @@ flowchart TD
     T3 -->|Returns Grounded Answer| C["Final Output Answer"]
 
     style A fill:#2d6a4f,color:#fff
-    style CS fill:#e76f51,color:#fff
+    style GS fill:#e76f51,color:#fff
     style C fill:#1b4332,color:#fff
     style TL fill:#264653,color:#fff
 ```
@@ -329,11 +311,10 @@ LANGSMITH_PROJECT=agentic-rag-service
 
 ## 💻 Running the Services
 
-### Option A: Start the FastAPI Server
+### Option A: Start the FastAPI Web Server
 ```bash
 uvicorn api:app --reload
 ```
-Open `http://127.0.0.1:8000/docs` in your browser to test endpoints interactively using Swagger UI.
 
 ### Option B: Run the CrewAI Multi-Agent RAG Runner
 ```bash
@@ -349,13 +330,13 @@ python graph/rag_graph.py
 
 ## 🔌 API Reference
 
-You can interact with the RAG backend in two ways: using the visual interactive UI, or programmatically via code.
+### 1. Interactive Testing (Swagger UI)
+Once the FastAPI server is running, open your browser and go to:
+👉 **`http://127.0.0.1:8000/docs`**
 
-### Method 1: Interactive UI (Swagger)
-FastAPI automatically generates a visual dashboard where you can click **"Try it out"** to upload files and send queries directly from your browser.
-👉 **Go to:** `http://127.0.0.1:8000/docs` (or your live Render URL `/docs`)
+Here you can click **"Try it out"** to upload files, list documents, and send queries directly from the UI.
 
-### Method 2: Programmatic API (Usage Example)
+### 2. Programmatic Integration (Usage Example)
 You can call the endpoints from any frontend (React, Flutter) or script using standard HTTP requests. 
 
 **Usage example (Python `requests`):**
@@ -368,7 +349,7 @@ BASE_URL = "https://your-render-url.com" # or http://127.0.0.1:8000
 with open("sample.pdf", "rb") as f:
     upload_res = requests.post(f"{BASE_URL}/documents/upload", files={"file": f})
     
-DOCUMENT_ID = upload_res.json()["DOCUMENT_ID"]
+DOCUMENT_ID = upload_res.json()["document_id"]
 print(f"Uploaded successfully. Document ID: {DOCUMENT_ID}")
 
 # 2. Ask a question about the PDF
