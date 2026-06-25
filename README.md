@@ -42,7 +42,7 @@ test_rag/
 │
 ├── services/
 │   ├── __init__.py           
-│   ├── agent_completion.py   ← OpenRouter API completion caller
+│   ├── agent_completion.py   ← OpenRouter API completions (agent_complete & grading_complete)
 │   ├── graph_services.py     ← Service wrapper for query execution via LangGraph
 │   └── ingest_service.py     ← PDF loading, chunking, embedding & vector database insertion
 │
@@ -259,6 +259,20 @@ Standard RAG systems blindly retrieve documents and pass them to an LLM, leading
 2. **Self-Correction**: If the grade is poor, it automatically rewrites the query and tries again.
 3. **Hallucination Prevention**: Before returning the final answer, a strict "Verifier" LLM cross-references the answer against the retrieved chunks. If it detects a hallucination, it flags it.
 
+---
+
+## 🤖 LLM Completion Services
+
+The application implements custom helper functions in [services/agent_completion.py](file:///home/sakil/Documents/LLM%20Learning/test_rag/services/agent_completion.py) to manage LLM interactions through OpenRouter:
+
+*   **`agent_complete()`**: The primary completion function used for answering user queries.
+    *   **Default Model**: `minimax/minimax-m2.5:free` (defined via `RouterModel.MINIMAX25.value`).
+    *   **Usage**: Handles prompt synthesis and drafting responses from the context.
+*   **`grading_complete()`**: A specialized completion function designed for grading and evaluation tasks.
+    *   **Default Model**: `google/gemma-4-31b-it:free` (defined via `RouterGradingModel.GEMMA4.value`).
+    *   **Usage**: Leveraged by the LangGraph pipeline in:
+        *   `grade_documents_node` to evaluate if retrieved chunks are relevant to the user query.
+        *   `check_hallucination_node` to verify that the generated answer is strictly grounded in the source context.
 
 ---
 
@@ -268,7 +282,8 @@ Standard RAG systems blindly retrieve documents and pass them to an LLM, leading
 |---|---|
 | **API Framework** | FastAPI (with Pydantic schemas) |
 | **Agentic Frameworks**| CrewAI & LangGraph |
-| **LLM API** | OpenRouter (`openrouter.ai`) |
+| **Primary LLM** | `minimax/minimax-m2.5:free` via OpenRouter |
+| **Grading LLM** | `google/gemma-4-31b-it:free` via OpenRouter |
 | **Embeddings** | `openai/text-embedding-3-small` via OpenRouter |
 | **Vector DB** | Neon Serverless PostgreSQL |
 | **Vector Search** | `pgvector` (Cosine Similarity `<=>`) |
