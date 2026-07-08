@@ -1,27 +1,28 @@
+# 🤖 Agentic RAG Service — Custom RAG with FastAPI, CrewAI (CLI Only), & LangGraph
+
 ## 🚀 Live Demo
-API Docs: https://agentic-rag-service.onrender.com/docs
-
-# 🤖 Agentic RAG Service — Custom RAG with FastAPI, CrewAI(CLI Only), & LangGraph
-
-This repository contains a modular, production-ready **Agentic RAG Service** built from scratch in Python. It progresses from basic vector retrieval to a robust web API, stateful routing, and multi-agent validation.
-
-> **Zero Orchestration Bloat**: The core RAG retrieval, custom recursive chunking, and database operations are written in pure Python without using LangChain or LlamaIndex wrappers, showing exactly what happens under the hood. 
+* **API Docs / Swagger UI:** [https://agentic-rag-service.onrender.com/docs](https://agentic-rag-service.onrender.com/docs)
 
 ---
 
-## 🚀 Key Features
+This repository contains a production-ready, modular **Agentic RAG Service** built from scratch in Python. It implements a self-correcting RAG pipeline that moves from relational databases and serverless Postgres to stateful routing graphs and multi-agent validation.
 
-*   **FastAPI REST Web Service**: Endpoints to list documents, upload/ingest PDF documents dynamically, and query context.
-*   **CrewAI Multi-Agent Team**: A collaborative group of agents fact-checking QA outputs:
-    *   **Document Retriever**: Uses a custom RAG database tool to gather relevant text.
-    *   **Answer Synthesizer**: Drafts a concise answer grounded *only* in retrieved facts.
-    *   **Answer Verifier**: A strict editor that cross-references assertions with sources and edits out hallucinations.
-*   **LangGraph Routing State Machine**: A state graph routing logic:
-    *   **Retrieve node** searches for context.
-    *   **Conditional routing** checks if high-similarity chunks were found.
-    *   **Answer node** fires if context is present, else routes directly to `END` to prevent hallucinations.
-*   **Neon Database + pgvector**: Vector distance similarity matches are offloaded directly to Neon serverless PostgreSQL via SQL operators.
-*   **Render-Ready Deployment**: Includes `render.yaml` and `requirements.txt` configs for instant hosting as a live Render Web Service.
+> **Zero Framework Bloat for Core Retrieval**: The core text processing, custom recursive chunking, pgvector similarity search, and SQL-native full-text keyword queries are written in pure Python/SQL without using LangChain or LlamaIndex wrappers.
+
+---
+
+## 🌟 Key Features
+
+*   **Database-Native Hybrid Search**: Combines semantic vector similarity search (`pgvector` cosine distance `<=>`) with exact keyword search (Postgres Full-Text Search using `ts_rank` and `websearch_to_tsquery`) directly inside SQL.
+*   **Reciprocal Rank Fusion (RRF)**: Merges sparse and dense search result rankings mathematically without needing to manually tune weights:
+    $$RRF(d) = \sum_{r \in R} \frac{1}{60 + r(d)}$$
+*   **Two-Pass Re-ranking**:
+    *   **Pass 1 (Lexical Rescoring)**: A lightweight keyword overlap metric that boosts chunks with exact query matches.
+    *   **Pass 2 (Stateful LLM Reranking)**: An optional LangGraph node that uses a lightweight LLM-as-a-Judge to evaluate retrieved chunks and bubble up the most relevant ones.
+*   **Self-Correcting Graph Workflows (LangGraph)**: Stateful loop that retrieves context, grades relevance via an LLM, automatically rewrites queries on low-quality search results, generates answers, and verifies factuality (hallucination check) before returning the response.
+*   **FastAPI REST Web Service**: Endpoints for dynamic PDF document uploading, listing, deletion, and context-retrieval chat.
+*   **CrewAI Collaborative CLI**: A cooperative team of agents (Retriever, Synthesizer, and Verifier) executing QA workflows in the terminal.
+*   **Observability (LangSmith)**: Native tracing integration for all agentic chains.
 
 ---
 
@@ -31,29 +32,34 @@ This repository contains a modular, production-ready **Agentic RAG Service** bui
 test_rag/
 │
 ├── api.py                    ← FastAPI Web Application Entry Point
+├── dependencies.py           ← FastAPI dependency injection mapping
+├── schemas.py                ← Pydantic API validation schemas
+├── render.yaml               ← Deployment config for render.com Web Service
+├── requirements.txt          ← System dependencies (local & Render)
+│
 ├── config/
 │   ├── __init__.py           ← Settings / configuration loader
 │   └── openrouter_settings.py← OpenRouter LLM and embed models configuration
 │
 ├── routes/
-│   ├── health.py             ← Health status check endpoint
+│   ├── health.py             ← Health status check with live database ping
 │   ├── documents.py          ← File uploading, listing, and deletion endpoints
-│   └── chat.py               ← Querying and generating answers via LLM
+│   └── chat.py               ← Querying and generating answers via LangGraph
 │
 ├── services/
 │   ├── __init__.py           
-│   ├── agent_completion.py   ← OpenRouter API completions (agent_complete & grading_complete)
+│   ├── agent_completion.py   ← OpenRouter API completion and grading caller
 │   ├── graph_services.py     ← Service wrapper for query execution via LangGraph
-│   └── ingest_service.py     ← PDF loading, chunking, embedding & vector database insertion
+│   └── ingest_service.py     ← PDF loading, chunking, embedding & vector DB insertion
 │
 ├── core/
 │   ├── __init__.py           
 │   ├── chunking.py           ← Recursive paragraph/sentence/word chunker
 │   ├── document_loader.py    ← pypdf loader with page offset mapping
-│   ├── embeddings.py         ← OpenRouter embed client
-│   ├── models.py             ← Return structures (RetrievalResult, etc.)
-│   ├── rag_engine.py         ← Prompt builders & contexts compiler
-│   └── vector_store.py       ← Neon PostgreSQL connection and pgvector search queries
+│   ├── embeddings.py         ← OpenRouter embedding client
+│   ├── models.py             ← Return structures (RetrievalResult, ChatResult, etc.)
+│   ├── rag_engine.py         ← Prompt builders, RAG context compilers, and lexical reranker
+│   └── vector_store.py       ← Neon PostgreSQL connection and FTS + pgvector hybrid search
 │
 ├── crew/
 │   ├── __init__.py           
@@ -66,24 +72,26 @@ test_rag/
 │
 ├── graph/
 │   ├── __init__.py           
-│   └── rag_graph.py          ← LangGraph StateGraph routing nodes (retrieve, answer, router)
+│   └── rag_graph.py          ← LangGraph StateGraph routing nodes (retrieve, rerank, grading, answer)
 │
 ├── scripts/
-│   └── crew_runner.py        ← Script to kickoff the CrewAI RAG agent
+│   ├── crew_runner.py        ← Script to kickoff the CrewAI RAG agent
+│   ├── compare_retrieval.py  ← Script to compare Keyword vs Vector vs Hybrid (RRF) search
+│   ├── test_hybrid_search.py ← Script to smoke-test RRF retrieval
+│   └── test_keyword_search.py← Script to smoke-test PostgreSQL keyword search
 │
-├── docs/
-│   └── project_flow.md       ← Full Mermaid diagrams
+├── data/
+│   └── sample.pdf            ← PDF file used for testing
 │
-├── requirements.txt          ← System dependencies (for local & Render)
-├── render.yaml               ← Deployment config for render.com Web Service
-└── .gitignore                ← Files to exclude from git commits
+└── docs/
+    └── project_flow.md       ← Full Mermaid diagrams
 ```
 
 ---
 
 ## 📸 Architectural Visuals
 
-Detailed diagrams showing how data flows through the application:
+Detailed diagrams showing how data flows through the application (see [docs/project_flow.md](docs/project_flow.md) for full-res versions):
 
 ### 1. Ingesting a PDF (API Flow)
 ```mermaid
@@ -111,9 +119,11 @@ flowchart TD
     I --> I1["INSERT INTO documents → DOCUMENT_ID"]
     
     I1 --> J["NeonVectorStore.insert_chunks()"]
-    J --> J1["INSERT INTO document_chunks\n(DOCUMENT_ID, chunk_index, chunk_text, embedding, page_number)"]
+    J --> J1["INSERT INTO document_chunks
+(DOCUMENT_ID, chunk_index, chunk_text, embedding, page_number)"]
     
-    J1 --> K["Returns IngestResult\n(DOCUMENT_ID, file_name, page_count, chunk_count)"]
+    J1 --> K["Returns IngestResult
+(DOCUMENT_ID, file_name, page_count, chunk_count)"]
 
     style A fill:#2a9d8f,color:#fff
     style B fill:#264653,color:#fff
@@ -131,7 +141,8 @@ flowchart TD
     
     C --> D["rag_graph.invoke()"]
     D --> E["Retrieve Node → Grade Node → Answer Node"]
-    E --> J["Returns ChatResult\n(answer, sources)"]
+    E --> J["Returns ChatResult
+(answer, sources)"]
     J --> K["routes/chat.py returns QueryResponse JSON"]
 
     style A fill:#2a9d8f,color:#fff
@@ -224,24 +235,28 @@ flowchart TD
 ```mermaid
 flowchart TD
     A["graph/rag_graph.py (invoke)"] --> START["START"]
-    
+
     START --> RET["retrieve_node"]
-    
-    RET --> GRADE["grade_documents_node\n(LLM grades context)"]
+
+    RET --> GRADE["grade_documents_node
+(LLM grades context)"]
     GRADE --> COND1{"route_after_grading"}
-    
+
     COND1 -->|has_context| SEL["select_context_node"]
-    COND1 -->|retry_count < max| REW["rewrite_query_node\n(Expands search)"]
+    COND1 -->|retry_count < max| REW["rewrite_query_node
+(Expands search)"]
     COND1 -->|no retries left| NO_CTX["no_context_node"]
-    
+
     REW --> RET
-    
+
     SEL --> COND2{"route_after_select"}
-    COND2 -->|has_context| ANS["answer_node\n(LLM drafts answer)"]
+    COND2 -->|has_context| ANS["answer_node
+(LLM drafts answer)"]
     COND2 -->|no_context| NO_CTX
-    
-    ANS --> HALLUC["check_hallucination_node\n(LLM verifies factuality)"]
-    
+
+    ANS --> HALLUC["check_hallucination_node
+(LLM verifies factuality)"]
+
     HALLUC --> END1["END (Return: Verified Answer)"]
     NO_CTX --> END2["END (Return: No relevant info)"]
 
@@ -261,33 +276,18 @@ Standard RAG systems blindly retrieve documents and pass them to an LLM, leading
 
 ---
 
-## 🤖 LLM Completion Services
-
-The application implements custom helper functions in [services/agent_completion.py](file:///home/sakil/Documents/LLM%20Learning/test_rag/services/agent_completion.py) to manage LLM interactions through OpenRouter:
-
-*   **`agent_complete()`**: The primary completion function used for answering user queries.
-    *   **Default Model**: `minimax/minimax-m2.5:free` (defined via `RouterModel.MINIMAX25.value`).
-    *   **Usage**: Handles prompt synthesis and drafting responses from the context.
-*   **`grading_complete()`**: A specialized completion function designed for grading and evaluation tasks.
-    *   **Default Model**: `google/gemma-4-31b-it:free` (defined via `RouterGradingModel.GEMMA4.value`).
-    *   **Usage**: Leveraged by the LangGraph pipeline in:
-        *   `grade_documents_node` to evaluate if retrieved chunks are relevant to the user query.
-        *   `check_hallucination_node` to verify that the generated answer is strictly grounded in the source context.
-
----
-
 ## 🏗️ Tech Stack
 
 | Layer | Technology |
 |---|---|
 | **API Framework** | FastAPI (with Pydantic schemas) |
 | **Agentic Frameworks**| CrewAI & LangGraph |
-| **Primary LLM** | `minimax/minimax-m2.5:free` via OpenRouter |
-| **Grading LLM** | `google/gemma-4-31b-it:free` via OpenRouter |
+| **LLM API** | OpenRouter (`openrouter.ai`) |
 | **Embeddings** | `openai/text-embedding-3-small` via OpenRouter |
 | **Vector DB** | Neon Serverless PostgreSQL |
 | **Vector Search** | `pgvector` (Cosine Similarity `<=>`) |
-| **PDF Parsing** | `pypdf` |
+| **Sparse Keyword Search**| PostgreSQL Full-Text Search (`ts_rank`, `websearch_to_tsquery`) |
+| **PDF Ingestion** | `pypdf` |
 | **Database Driver** | `psycopg` (v3) |
 | **Hosting Platform** | Render |
 
@@ -299,8 +299,8 @@ The application implements custom helper functions in [services/agent_completion
 
 Clone the repository and set up a virtual environment:
 ```bash
-git clone https://github.com/<your-username>/<your-new-repo-name>
-cd <your-new-repo-name>
+git clone https://github.com/hasnatsakil/agentic-rag-service.git
+cd agentic-rag-service
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -336,7 +336,7 @@ uvicorn api:app --reload
 python scripts/crew_runner.py
 ```
 
-### Option C: Run the LangGraph Stateful Pipeline
+### Option C: Run the LangGraph Stateful Pipeline (CLI Interface)
 ```bash
 python graph/rag_graph.py
 ```
@@ -370,11 +370,13 @@ print(f"Uploaded successfully. Document ID: {DOCUMENT_ID}")
 # 2. Ask a question about the PDF
 payload = {
     "DOCUMENT_ID": DOCUMENT_ID,
-    "question": "What is the main conclusion of this document?"
+    "question": "What is the main conclusion of this document?",
+    "use_llm_rerank": True  # Enable Pass 2 LLM Re-ranking!
 }
 chat_res = requests.post(f"{BASE_URL}/chat/query", json=payload)
 
-print("\n--- Answer ---")
+print("
+--- Answer ---")
 print(chat_res.json()["answer"])
 print(f"Latency: {chat_res.json()['process_time_ms']} ms")
 ```
@@ -383,7 +385,7 @@ print(f"Latency: {chat_res.json()['process_time_ms']} ms")
 * **`POST /documents/upload`** — Uploads and vectorizes a `.pdf` file.
 * **`GET /documents`** — Lists all indexed documents.
 * **`DELETE /documents/{DOCUMENT_ID}`** — Removes a document and its vectors.
-* **`POST /chat/query`** — Performs similarity search and generates an LLM answer.
+* **`POST /chat/query`** — Performs hybrid similarity search, optional re-ranking, and generates an LLM answer.
 * **`GET /health`** — Pinger endpoint to check server status.
 
 ---
@@ -393,7 +395,7 @@ print(f"Latency: {chat_res.json()['process_time_ms']} ms")
 This repository is pre-configured for deployment as a Render **Web Service** using the included `render.yaml` configuration.
 
 ### Deploy Steps:
-1. Push your code to your new GitHub repository.
+1. Push your code to your GitHub repository.
 2. Log into [Render](https://render.com).
 3. Click **New** -> **Blueprint**.
 4. Connect this repository. Render will automatically read the `render.yaml` file.
