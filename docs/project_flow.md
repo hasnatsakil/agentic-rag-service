@@ -1,7 +1,8 @@
 # RAG Project — Code Flow Visual
 
-## Flow 1: Ingesting a PDF (API)
+Detailed diagrams showing how data flows through the application:
 
+## Flow 1: Ingesting a PDF (API Flow)
 ```mermaid
 flowchart TD
     A["POST /documents/upload"] --> B["routes/documents.py (upload_file)"]
@@ -39,49 +40,25 @@ flowchart TD
     style J1 fill:#264653,color:#fff
 ```
 
----
-
-## Flow 2: Chatting with a PDF (API Query)
-
+## Flow 2: Chatting with a PDF (API Query Flow via LangGraph)
 ```mermaid
 flowchart TD
-    A["POST /chat/query"] --> B["routes/chat.py (query_pdf)"]
-    B --> C["ChatService.ask_pdf()"]
+    A["POST /chat/query"] --> B["routes/chat.py (query_pdf_graph)"]
+    B --> C["GraphService.ask_pdf_with_graph()"]
     
-    C --> D["OpenRouterEmbeddingClient.embed_query()"]
-    D --> D1["OpenRouter API → query vector"]
-    
-    D1 --> E["NeonVectorStore.similarity_search()"]
-    E --> E1["pgvector cosine distance query\nFILTERED by DOCUMENT_ID\nLIMIT SEARCH_K=8"]
-    E1 --> E2["list of RetrievalResult\n(score, chunk_id, chunk_text, page_number)"]
-    
-    E2 --> F{"Any score >= MIN_SCORE 0.3?"}
-    F -- No --> F1["Return: not enough context"]
-    F -- Yes --> G["Take top ANSWER_K=3 chunks\nwithin MAX_CONTEXT_CHARS=3000"]
-    
-    G --> H["RAGEngine.build_context()\nFormat: [Page X, Chunk Y]\nchunk_text..."]
-    
-    H --> I["RAGEngine.generate_answer()"]
-    I --> I1["agent_complete() → OpenRouter LLM API"]
-    I1 --> I2["LLM answers from context only"]
-    
-    I2 --> J["Returns ChatResult\n(answer, sources)"]
+    C --> D["rag_graph.invoke()"]
+    D --> E["Retrieve Node → Grade Node → Answer Node"]
+    E --> J["Returns ChatResult\n(answer, sources)"]
     J --> K["routes/chat.py returns QueryResponse JSON"]
 
     style A fill:#2a9d8f,color:#fff
     style B fill:#264653,color:#fff
-    style F1 fill:#9b2226,color:#fff
-    style D1 fill:#e76f51,color:#fff
-    style E1 fill:#264653,color:#fff
-    style I1 fill:#e76f51,color:#fff
+    style D fill:#e76f51,color:#fff
+    style E fill:#264653,color:#fff
     style J fill:#1b4332,color:#fff
 ```
 
-
----
-
-## Flow 3: FastAPI Web API Endpoints
-
+## Flow 3: Web API Routing & Services
 ```mermaid
 flowchart TD
     subgraph Client["HTTP Clients (Postman/Curl/Frontend)"]
@@ -91,7 +68,7 @@ flowchart TD
 
     subgraph API["FastAPI Layer"]
         R_DOC["routes/documents.py (upload_file)"]
-        R_CHAT["routes/chat.py (query_pdf)"]
+        R_CHAT["routes/chat.py (query_pdf_graph)"]
     end
 
     subgraph DI["Dependency Injection"]
@@ -100,20 +77,19 @@ flowchart TD
 
     subgraph Services["Service Layer"]
         IS["IngestService.ingest_pdf()"]
-        CS["ChatService.ask_pdf()"]
+        GS["GraphService.ask_pdf_with_graph()"]
     end
 
     C1 --> R_DOC
     C2 --> R_CHAT
 
     R_DOC -.->|Depends| D1
-    R_CHAT -.->|Depends| D1
     
     D1 -->|Injects| IS
-    D1 -->|Injects| CS
 
     IS -->|Returns IngestResult| R_DOC
-    CS -->|Returns ChatResult| R_CHAT
+    R_CHAT -->|Calls directly| GS
+    GS -->|Returns ChatResult| R_CHAT
 
     R_DOC -->|Returns UploadResponse| C1
     R_CHAT -->|Returns QueryResponse| C2
@@ -123,13 +99,10 @@ flowchart TD
     style R_DOC fill:#264653,color:#fff
     style R_CHAT fill:#264653,color:#fff
     style IS fill:#e76f51,color:#fff
-    style CS fill:#e76f51,color:#fff
+    style GS fill:#e76f51,color:#fff
 ```
 
----
-
 ## Flow 4: CrewAI Collaborative Team Flow
-
 ```mermaid
 flowchart TD
     A["scripts/crew_runner.py"] --> B["rag_crew.kickoff()"]
@@ -147,7 +120,7 @@ flowchart TD
     B --> T1
     AG1 -->|Executes| T1
     T1 -->|Uses custom search_pdf tool| TL["crew/tools/rag_tool.py"]
-    TL -->|Queries| CS["ChatService().ask_pdf()"]
+    TL -->|Queries| GS["GraphService.ask_pdf_with_graph()"]
     
     T1 -->|Outputs Chunks| T2
     AG2 -->|Executes| T2
@@ -159,36 +132,33 @@ flowchart TD
     T3 -->|Returns Grounded Answer| C["Final Output Answer"]
 
     style A fill:#2d6a4f,color:#fff
-    style CS fill:#e76f51,color:#fff
+    style GS fill:#e76f51,color:#fff
     style C fill:#1b4332,color:#fff
     style TL fill:#264653,color:#fff
 ```
 
----
-
 ## Flow 5: LangGraph Self-Correcting Flow (Level 9)
-
 ```mermaid
 flowchart TD
     A["graph/rag_graph.py (invoke)"] --> START["START"]
-
+    
     START --> RET["retrieve_node"]
-
+    
     RET --> GRADE["grade_documents_node\n(LLM grades context)"]
     GRADE --> COND1{"route_after_grading"}
-
+    
     COND1 -->|has_context| SEL["select_context_node"]
     COND1 -->|retry_count < max| REW["rewrite_query_node\n(Expands search)"]
     COND1 -->|no retries left| NO_CTX["no_context_node"]
-
+    
     REW --> RET
-
+    
     SEL --> COND2{"route_after_select"}
     COND2 -->|has_context| ANS["answer_node\n(LLM drafts answer)"]
     COND2 -->|no_context| NO_CTX
-
+    
     ANS --> HALLUC["check_hallucination_node\n(LLM verifies factuality)"]
-
+    
     HALLUC --> END1["END (Return: Verified Answer)"]
     NO_CTX --> END2["END (Return: No relevant info)"]
 
@@ -200,108 +170,25 @@ flowchart TD
     style END2 fill:#9b2226,color:#fff
 ```
 
+### 🧠 Why LangGraph? (The Self-Correcting Architecture)
+Standard RAG systems blindly retrieve documents and pass them to an LLM, leading to hallucinations if the context is poor. By using **LangGraph**, this service acts autonomously:
+1. **Grading**: It explicitly asks a lightweight LLM-as-a-Judge if the retrieved chunks actually answer the question.
+2. **Self-Correction**: If the grade is poor, it automatically rewrites the query and tries again.
+3. **Hallucination Prevention**: Before returning the final answer, a strict "Verifier" LLM cross-references the answer against the retrieved chunks. If it detects a hallucination, it flags it.
+
 ---
 
-## File Dependency Map
+## 🤖 LLM Completion Services
 
-```mermaid
-flowchart TD
-    subgraph Entry["Entry Points"]
-        API["api.py (FastAPI App)"]
-        CR["scripts/crew_runner.py (CLI)"]
-        GR["graph/rag_graph.py (CLI)"]
-    end
+The application implements custom helper functions in [services/agent_completion.py](file:///home/sakil/Documents/LLM%20Learning/test_rag/services/agent_completion.py) to manage LLM interactions through OpenRouter:
 
-    subgraph API_Routes["API Routes"]
-        RH["routes/health.py"]
-        RD["routes/documents.py"]
-        RC["routes/chat.py"]
-    end
+*   **`agent_complete()`**: The primary completion function used for answering user queries.
+    *   **Default Model**: `minimax/minimax-m2.5:free` (defined via `RouterModel.MINIMAX25.value`).
+    *   **Usage**: Handles prompt synthesis and drafting responses from the context.
+*   **`grading_complete()`**: A specialized completion function designed for grading and evaluation tasks.
+    *   **Default Model**: `google/gemma-4-31b-it:free` (defined via `RouterGradingModel.GEMMA4.value`).
+    *   **Usage**: Leveraged by the LangGraph pipeline in:
+        *   `grade_documents_node` to evaluate if retrieved chunks are relevant to the user query.
+        *   `check_hallucination_node` to verify that the generated answer is strictly grounded in the source context.
 
-    subgraph Dependency["Dependency Injection"]
-        DEP["dependencies.py"]
-    end
-
-    subgraph Agentic["Agentic Layers"]
-        CRW["crew/crews/rag_crew.py (CrewAI)"]
-        TL["crew/tools/rag_tool.py (RAG Tool)"]
-        LGP["graph/rag_graph.py (LangGraph)"]
-    end
-
-    subgraph Services["Service Layer"]
-        IS["services/ingest_service.py"]
-        CS["services/chat_service.py"]
-    end
-
-    subgraph Core["Core Logic"]
-        RE["core/rag_engine.py"]
-        CH["core/chunking.py"]
-        DL["core/document_loader.py"]
-        EM["core/embeddings.py"]
-        VS["core/vector_store.py"]
-    end
-
-    subgraph Config_Models["Config, Models & Schemas"]
-        CONF["config/__init__.py"]
-        SCH["schemas.py"]
-        OR["config/openrouter_settings.py"]
-        MD["core/models.py"]
-    end
-
-    subgraph External["External Infrastructure"]
-        NE["Neon PostgreSQL + pgvector"]
-        OA["OpenRouter API"]
-    end
-
-    %% Routing Flow
-    API --> RH
-    API --> RD
-    API --> RC
-
-    %% Dependency Connections
-    RD -.-> DEP
-    RC -.-> DEP
-    DEP --> IS
-    DEP --> CS
-    DEP --> VS
-
-    %% CLI and Runners Connections
-    CR --> CRW
-    CRW --> TL
-    TL --> CS
-    GR --> LGP
-    LGP --> EM
-    LGP --> VS
-    LGP --> RE
-
-    %% Service Connections
-    IS --> DL
-    IS --> CH
-    IS --> RE
-    IS --> VS
-    
-    CS --> EM
-    CS --> RE
-    CS --> VS
-
-    %% Core Connections
-    RE --> EM
-    RE --> AC["services/agent_completion.py"]
-    EM --> OR
-    AC --> OR
-    VS --> NE
-
-    %% Configuration & Schema usage
-    RD & RC --> SCH
-    SCH --> CONF
-    VS & IS & CS & RE --> MD
-    OR & AC & EM --> OA
-
-    style API fill:#e76f51,color:#fff
-    style CR fill:#2d6a4f,color:#fff
-    style GR fill:#2d6a4f,color:#fff
-    style NE fill:#264653,color:#fff
-    style OA fill:#264653,color:#fff
-```
-
-
+---
