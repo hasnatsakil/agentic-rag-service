@@ -86,7 +86,7 @@ class IngestResult:
 
 @dataclass
 class ChatResult:
-    """Container for the final answer and its supporting source chunks.
+    """Container for the final answer, supporting source chunks, and execution metrics.
 
     Returned by :meth:`~services.graph_services.GraphService.ask_pdf_with_graph`
     and serialised into :class:`~schemas.QueryResponse` by the chat route.
@@ -95,6 +95,10 @@ class ChatResult:
         answer (str): The LLM-generated answer to the user's question.
         sources (list[RetrievalResult]): The subset of retrieved chunks that
             were selected as context for generating the answer.
+        used_rewrite (bool): Whether the search query was dynamically expanded/rewritten.
+        is_grounded (bool): Whether the final answer was verified to be factual by the verifier node.
+        retrieval_count (int): Total number of chunks retrieved from the store after threshold filtering.
+        selected_count (int): Total number of top chunks selected for inclusion in the LLM context.
     """
 
     answer: str
@@ -103,3 +107,4 @@ class ChatResult:
     is_grounded: bool = False
     retrieval_count: int = 0
     selected_count: int = 0
+

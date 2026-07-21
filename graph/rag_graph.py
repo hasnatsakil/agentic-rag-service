@@ -2,48 +2,58 @@
 LangGraph RAG pipeline definition.
 
 This module builds and compiles the stateful LangGraph workflow that powers
-the self-correcting Retrieval-Augmented Generation loop.  The graph is
-compiled once at import time as :data:`rag_graph` and shared across all
+the self-correcting, agentic Retrieval-Augmented Generation loop.  The graph
+is compiled once at import time as :data:`rag_graph` and shared across all
 requests.
 
 Pipeline overview
 -----------------
-The graph implements the following flow:
-
-.. code-block:: text
+The graph implements the following flow::
 
     START
       │
       ▼
-    [agent]  ─── has answer? ──► [check_hallucination] ──► END
-      │ needs tool call
+    [agent]  ─── direct answer ──► [check_hallucination] ──► END
+      │ tool call requested
       ▼
     [execute_tool]
       │
-      ▼
-    [grade_documents]
-      │
-      ├── relevant?   ──► [select_context] ──► [agent]  (loop back)
-      ├── can retry?  ──► [rewrite_query]  ──► [execute_tool]
-      └── exhausted   ──► [no_context]     ──► END
+      ├── use_llm_rerank=True ──► [llm_rerank] ──► [grade_documents]
+      └── use_llm_rerank=False ─────────────────► [grade_documents]
+                                                          │
+                                  ┌───── relevant ────────┤
+                                  │                       │
+                          [select_context]        retry? ─┤
+                                  │                       │
+                                  └──► [agent]   [rewrite_query]
+                                       (loop)          │
+                                               [execute_tool] (retry)
+
+    grade_documents exhausted: [no_context] ──► END
 
 Node descriptions:
-    agent_node:              Calls the LLM with optional tool schema; either
-                             answers directly or requests a vector search.
-    execute_tool_node:       Executes the vector + keyword hybrid search and
-                             builds the raw context string.
-    grade_documents_node:    Uses a lightweight LLM to judge whether the
-                             retrieved context is relevant to the question.
-    rewrite_query_node:      Appends clarifying text to the search query
-                             before retrying retrieval.
-    select_context_node:     Trims the retrieved chunks to fit within the
-                             ``MAX_CONTEXT_CHARS`` and ``ANSWER_K`` budget.
-    answer_node:             Generates a grounded final answer from the
-                             selected context.
-    check_hallucination_node:Verifies that the generated answer is supported
-                             by the retrieved facts.
-    no_context_node:         Returns a helpful message when no relevant
-                             context was found after all retries.
+    agent_node:               Calls the LLM with tool schema + chat history +
+                              running summary + document catalog.  Either
+                              produces a direct answer or requests a vector
+                              database search via native tool calling.
+    execute_tool_node:        Embeds the search query, runs hybrid
+                              (vector + keyword) search, fuses results via RRF,
+                              and applies Pass 1 lexical keyword rescoring.
+    llm_rerank_node:          Optional Pass 2 re-ranking. Sends candidate
+                              chunks to a judge LLM which returns them in
+                              best-first order before grading.
+    grade_documents_node:     Sends each candidate chunk to a lightweight judge
+                              LLM for binary relevance grading (yes / no).
+    rewrite_query_node:       If no relevant chunks were found, an LLM rewrites
+                              the query into keyword-style search terms before
+                              retrying retrieval.
+    select_context_node:      Trims the graded chunks to fit within the
+                              ``MAX_CONTEXT_CHARS`` and ``ANSWER_K`` budget,
+                              then routes back to agent_node.
+    check_hallucination_node: Verifies the generated answer is supported by the
+                              retrieved facts. Prepends a warning if not.
+    no_context_node:          Returns a helpful message when no relevant context
+                              was found after all retries are exhausted.
 
 Can be run directly for interactive testing::
 
@@ -113,6 +123,9 @@ class RAGState(TypedDict):
     question: str
     search_question: str
     DOCUMENT_ID: int
+    available_documents: list[dict]
+    history: list[dict]
+    summary: str
     SEARCH_K: int
     GRADE_K:int
     ANSWER_K: int
@@ -152,12 +165,33 @@ def agent_node(state: RAGState) -> dict:
         the LLM requests a tool call, or ``{"answer": <text>}`` when the
         LLM answers directly.
     """
+    doc_catalog = []
+    for doc in state.get("available_documents", []):
+        doc_catalog.append(
+            f"ID: {doc['id']} | Filename: {doc['file_name']} | Scope: {doc.get('summary', '')}"
+        )
+    catalog_str = "\n".join(doc_catalog)
+
+    history_str = ""
+    for msg in state.get("history", []):
+        history_str += f"{msg['role']}: {msg['content']}\n"
+
     messages = [
         {
             "role": "system",
             "content": (
-                "You are a helpful assistant. You have access to a "
-                "database search tool. Use it if you need facts from the document."
+                "You are a helpful document assistant. "
+                "If the user is asking a question about a document, you must choose the most relevant "
+                "document from the catalog and query the database using the search tool.\n"
+                # ─── ADD THIS WARNING LINE ────────────────────────
+                "You MUST use the exact integer 'ID' value (e.g., 10, 9, 8) as the 'document_id' argument. "
+                "Do NOT use row numbers, sequence indices, or make up your own IDs.\n"
+                "If the question is a greeting or a general follow-up that you can answer from "
+                "your context or summary, answer directly. Do not use the tool "
+                "if the answer is already on your context.\n\n"
+                f"Available Documents:\n{catalog_str}\n\n"
+                f"Running Memory of Older Chats: {state.get('summary', '')}\n\n"
+                f"Recent cat history:\n{history_str}"
             ),
         },
         {
@@ -172,18 +206,24 @@ def agent_node(state: RAGState) -> dict:
             "role": "system",
             "content": f"Database search results: {state['chunks']}",
         })
+    has_retrieved_context = bool(state.get("has_context") and state.get("chunks"))
+
+    tool_to_pass = None if has_retrieved_context else RAGEngine.get_tools()
 
     completion = agent_complete(
         messages=messages,
-        tools=RAGEngine.get_tools(),
+        tools=tool_to_pass,
     )
     message = completion.choices[0].message
 
     # If the LLM decided to call a tool, extract the search query.
     if message.tool_calls:
         args = json.loads(message.tool_calls[0].function.arguments)
+
+        selected_doc_id = args.get("document_id", state.get("DOCUMENT_ID"))
         return {
             "search_question": args.get("query", state["question"]),
+            "DOCUMENT_ID": selected_doc_id,
             "used_rewrite": True,
         }
     else:
@@ -253,7 +293,19 @@ def execute_tool_node(state: RAGState) -> dict:
         "chunks": context_str,
     }
 
-def llm_rerank_node(state:RAGState) -> dict:
+def llm_rerank_node(state: RAGState) -> dict:
+    """Re-rank candidate chunks using an LLM-as-a-Judge (Pass 2 Re-ranking).
+
+    Passes retrieved candidate chunks to a fast model that evaluates overall semantic fit
+    to the user question and returns a best-first ordered list of chunk indexes.
+    Re-orders ``filtered_results`` accordingly.
+
+    Args:
+        state: Current graph state containing ``filtered_results``.
+
+    Returns:
+        A dict updating ``filtered_results`` with the LLM-re-ordered results.
+    """
     results = state.get("filtered_results", [])
 
     if not results:
@@ -262,6 +314,7 @@ def llm_rerank_node(state:RAGState) -> dict:
     candidate_text = []
 
     for index, result in enumerate(results, start=1):
+
         candidate_text.append(
             f"{index}. {result.label()}\n{result.chunk_text[:800]}"
         )
@@ -378,17 +431,18 @@ def grade_documents_node(state: RAGState) -> dict:
 
         completion = agent_complete(
             messages=messages,
-            max_tokens=10,
+            max_tokens=300,
             temperature=0.0,
             is_grading=True,
         )
-
-        content = completion.choices[0].message.content
+        message = completion.choices[0].message
+        content = message.content or getattr(message, "reasoning", "")
+        # content = completion.choices[0].message.content
         grade = content.strip().lower() if content else "no"
 
         print("[CHUNK GRADER]", result.label(), grade)
 
-        if grade.startswith("yes"):
+        if "yes" in grade:
             relavant_results.append(result)
     
     if not relavant_results:
@@ -433,7 +487,7 @@ def rewrite_query_node(state: RAGState) -> dict:
 
     completion = agent_complete(
         messages=messages,
-        max_tokens=50,
+        max_tokens=100,
         temperature=0.0,
         is_grading=True,
     )
@@ -452,20 +506,6 @@ def rewrite_query_node(state: RAGState) -> dict:
         "has_context": False,
     }
 
-
-def select_context_node(state: RAGState) -> dict:
-    """Trim retrieved chunks to fit within budget constraints.
-
-    Iterates through ``filtered_results`` in score order and appends chunks
-    to the selection until either the ``MAX_CONTEXT_CHARS`` character budget
-    or the ``ANSWER_K`` chunk limit is reached.
-    """
-
-    return {
-        "search_question": new_query,
-        "retry_count": state.get("retry_count", 0) + 1,
-        "used_rewrite": True,
-    }
 
 
 def select_context_node(state: RAGState) -> dict:
@@ -515,25 +555,6 @@ def select_context_node(state: RAGState) -> dict:
     }
 
 
-def answer_node(state: RAGState) -> dict:
-    """Generate the final grounded answer from selected context.
-
-    Delegates to :meth:`~core.rag_engine.RAGEngine.generate_answer` which
-    constructs a strict system prompt and calls the LLM.
-
-    Args:
-        state: Current graph state (``chunks`` must be populated).
-
-    Returns:
-        ``{"answer": <generated answer string>}``.
-    """
-    answer = RAGEngine.generate_answer(
-        question=state["question"],
-        context=state["chunks"],
-    )
-    return {"answer": answer}
-
-
 def check_hallucination_node(state: RAGState) -> dict:
     """Verify that the generated answer is grounded in the retrieved facts.
 
@@ -568,7 +589,7 @@ def check_hallucination_node(state: RAGState) -> dict:
 
     completion = agent_complete(
         messages=messages,
-        max_tokens=500,
+        max_tokens=200,
         temperature=0.0,
         is_hallucination=True,
     )
@@ -640,7 +661,7 @@ def route_after_agent(state: RAGState) -> str:
         ``"execute_tool"`` if it requested a database search.
     """
     if state.get("answer"):
-        return END
+        return "check_hallucination"
     else:
         return "execute_tool"
 
@@ -651,7 +672,7 @@ def route_after_tool(state:RAGState) -> str:
     if state.get("use_llm_rerank"):
         return "llm_rerank"
 
-    return "select_context"
+    return "grade_documents"
 
 
 def route_after_hallucination(state: RAGState) -> str:
@@ -691,14 +712,22 @@ graph_builder.add_node("execute_tool", execute_tool_node)
 graph_builder.add_node("grade_documents", grade_documents_node)
 graph_builder.add_node("rewrite_query", rewrite_query_node)
 graph_builder.add_node("select_context", select_context_node)
-graph_builder.add_node("answer", answer_node)
 graph_builder.add_node("check_hallucination", check_hallucination_node)
 graph_builder.add_node("no_context", no_context_node)
 graph_builder.add_node("llm_rerank", llm_rerank_node)
 
 # Wire up edges:
 # START → agent → (answer directly or execute tool)
-graph_builder.add_edge(START, "execute_tool")
+graph_builder.add_edge(START, "agent")
+
+graph_builder.add_conditional_edges(
+    "agent",
+    route_after_agent,
+    {
+        "check_hallucination": "check_hallucination",
+        "execute_tool": "execute_tool",
+    }
+)
 
 # execute_tool → grade → (select context | rewrite | no context)
 graph_builder.add_conditional_edges(
@@ -707,11 +736,10 @@ graph_builder.add_conditional_edges(
     {
         "llm_rerank": "llm_rerank",
         "grade_documents": "grade_documents",
-        "select_context" : "select_context",
     }
 )
 
-graph_builder.add_edge("llm_rerank", "select_context")
+graph_builder.add_edge("llm_rerank", "grade_documents")
 graph_builder.add_conditional_edges(
     "grade_documents",
     right_after_grading,
@@ -726,9 +754,8 @@ graph_builder.add_conditional_edges(
 graph_builder.add_edge("rewrite_query", "execute_tool")
 
 # Successful path: select_context → agent (now has context, should answer).
-graph_builder.add_edge("select_context", "answer")
+graph_builder.add_edge("select_context", "agent")
 
-graph_builder.add_edge("answer", "check_hallucination")
 # Hallucination check → END (always, warning injected in route fn if ungrounded).
 graph_builder.add_conditional_edges(
     "check_hallucination",

@@ -23,6 +23,7 @@ from core.rag_engine import RAGEngine
 from core.document_loader import DocumentLoader
 from core.models import IngestResult
 from core.vector_store import NeonVectorStore
+from services.agent_completion import agent_complete
 
 
 class IngestService:
@@ -92,11 +93,32 @@ class IngestService:
         if not all_chunks:
             raise ValueError("No chunks created from PDF text.")
 
+        first_page_text = "\n".join([page["text"] for page in pages[:2]])[:1000] if pages else ""
+
+        summary_prompt = [
+            {
+                "role": "system",
+                "content": (
+                "Provide a single sentence summarizing what this document is about "
+                "based on it's first page. Keept it under 20 words."
+                "Ignore version control tables, version numbers, revision history, "
+                "release dates, or author credits. Return plain text only"
+                )
+            },
+            {
+                "role": "user",
+                "content": f"Document text sample:\n{first_page_text}"
+            }
+        ]
+
         # Embed all chunks in a single batched API call.
         embeddings = RAGEngine.embed_chunks(all_chunks)
 
+        completion = agent_complete(summary_prompt, is_grading=True)
+        doc_summary = completion.choices[0].message.content.strip()
+
         # Create the parent document record, then insert all chunks.
-        DOCUMENT_ID = NeonVectorStore.create_document(file_name=file_name)
+        DOCUMENT_ID = NeonVectorStore.create_document(file_name=file_name, summary=doc_summary)
         NeonVectorStore.insert_chunks(
             DOCUMENT_ID=DOCUMENT_ID,
             chunks=all_chunks,

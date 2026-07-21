@@ -119,7 +119,7 @@ class NeonVectorStore:
     # ------------------------------------------------------------------ #
 
     @classmethod
-    def create_document(cls, file_name: str) -> int:
+    def create_document(cls, file_name: str, summary:str = "") -> int:
         """Insert a new document record and return its generated ID.
 
         Args:
@@ -133,11 +133,11 @@ class NeonVectorStore:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO documents (file_name)
-                    VALUES (%s)
+                    INSERT INTO documents (file_name, summary)
+                    VALUES (%s, %s)
                     RETURNING id;
                     """,
-                    (file_name,),
+                    (file_name, summary),
                 )
                 DOCUMENT_ID = cursor.fetchone()[0]
 
@@ -473,7 +473,8 @@ class NeonVectorStore:
                     """
                     SELECT id,
                            file_name,
-                           created_at::text
+                           created_at::text,
+                           summary
                     FROM documents
                     ORDER BY created_at DESC;
                     """

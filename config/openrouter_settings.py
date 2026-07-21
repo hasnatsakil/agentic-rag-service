@@ -162,8 +162,8 @@ class RouterConfig:
             },
             "models": (
                 cls.GRADEING_MODELS_PRIORITY
-                if is_grading
-                else (cls.MODELS_PRIORITY[:2] + cls.PAID_MODELS_PRIORITY[:1])
+                if (is_grading or is_hallucination)
+                else ( cls.PAID_MODELS_PRIORITY[:2])
             ),
             "route": "fallback",
         }

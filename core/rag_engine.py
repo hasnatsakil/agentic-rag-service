@@ -362,9 +362,16 @@ class RAGEngine:
                                     "The specific search query to look for in the database "
                                     "(e.g., 'financial revenue 2023')."
                                 ),
-                            }
+                            },
+                            "document_id":{
+                                "type":"integer",
+                                "description": (
+                                    "The integer ID of the target document to search. "
+                                    "You MUST choose this ID from the available doucments list provided to you."
+                                ),
+                            },
                         },
-                        "required": ["query"],
+                        "required": ["query","document_id"],
                     },
                 },
             }
@@ -375,11 +382,22 @@ class RAGEngine:
         query: str,
         text: str
     ) -> float:
+        """Calculate the proportion of non-trivial query keywords present in the text.
 
+        Extracts unique words longer than 2 characters from the query and measures
+        the fraction that appear in the chunk text (case-insensitive, punctuation-stripped).
+
+        Args:
+            query: The search query string.
+            text: The chunk text string to score against.
+
+        Returns:
+            A float score in ``[0.0, 1.0]`` representing keyword overlap ratio.
+        """
         query_words = {
             word.lower().strip(".,:;()[]{}")
             for word in query.split()
-            if len(word) >2
+            if len(word) > 2
         }
         text_words = {
             word.lower().strip(".,:;()[]{}")
@@ -399,7 +417,21 @@ class RAGEngine:
         results: list[RetrievalResult],
         keyword_weight: float = 0.05
     ) -> list[RetrievalResult]:
-        
+        """Perform lightweight lexical rescoring (Pass 1 Re-ranking) on retrieved results.
+
+        Boosts each chunk's score based on exact keyword overlap with the search query
+        and re-sorts results in descending order.
+
+        Args:
+            query: The search query string.
+            results: List of :class:`~core.models.RetrievalResult` objects.
+            keyword_weight: Multiplier weight applied to the keyword overlap score.
+                Defaults to ``0.05``.
+
+        Returns:
+            A new list of :class:`~core.models.RetrievalResult` objects sorted by
+            updated score.
+        """
         reranked = []
 
         for result in results:
@@ -414,3 +446,4 @@ class RAGEngine:
         reranked.sort(key=lambda result: result.score, reverse=True)
 
         return reranked
+

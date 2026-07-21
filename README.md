@@ -1,303 +1,193 @@
-# 🤖 Agentic RAG Service — Custom RAG with FastAPI, CrewAI (CLI Only), & LangGraph
+# Agentic RAG Service
 
-## 🚀 Live Demo
-* **API Docs / Swagger UI:** [https://agentic-rag-service.onrender.com/docs](https://agentic-rag-service.onrender.com/docs)
+> **Production-ready, self-correcting Retrieval-Augmented Generation API** built from scratch in Python — no LangChain, no LlamaIndex for core retrieval.
 
----
-
-This repository contains a production-ready, modular **Agentic RAG Service** built from scratch in Python. It implements a self-correcting RAG pipeline that moves from relational databases and serverless Postgres to stateful routing graphs and multi-agent validation.
-
-> **Zero Framework Bloat for Core Retrieval**: The core text processing, custom recursive chunking, pgvector similarity search, and SQL-native full-text keyword queries are written in pure Python/SQL without using LangChain or LlamaIndex wrappers.
+**Live API Docs (Swagger UI):** [https://agentic-rag-service.onrender.com/docs](https://agentic-rag-service.onrender.com/docs)
 
 ---
 
-## 🌟 Key Features
+## Overview
 
-*   **Database-Native Hybrid Search**: Combines semantic vector similarity search (`pgvector` cosine distance `<=>`) with exact keyword search (Postgres Full-Text Search using `ts_rank` and `websearch_to_tsquery`) directly inside SQL.
-*   **Reciprocal Rank Fusion (RRF)**: Merges sparse and dense search result rankings mathematically without needing to manually tune weights:
-    $$RRF(d) = \sum_{r \in R} \frac{1}{60 + r(d)}$$
-*   **Two-Pass Re-ranking**:
-    *   **Pass 1 (Lexical Rescoring)**: A lightweight keyword overlap metric that boosts chunks with exact query matches.
-    *   **Pass 2 (Stateful LLM Reranking)**: An optional LangGraph node that uses a lightweight LLM-as-a-Judge to evaluate retrieved chunks and bubble up the most relevant ones.
-*   **Self-Correcting Graph Workflows (LangGraph)**: Stateful loop that retrieves context, grades relevance via an LLM, automatically rewrites queries on low-quality search results, generates answers, and verifies factuality (hallucination check) before returning the response.
-*   **FastAPI REST Web Service**: Endpoints for dynamic PDF document uploading, listing, deletion, and context-retrieval chat.
-*   **CrewAI Collaborative CLI**: A cooperative team of agents (Retriever, Synthesizer, and Verifier) executing QA workflows in the terminal.
-*   **Observability (LangSmith)**: Native tracing integration for all agentic chains.
+This service implements a full **Agentic RAG pipeline** that goes well beyond simple retrieve-and-read. The LLM is given tool-calling capability to decide *when* and *what* to search. Retrieved chunks are ranked twice, graded for relevance by a judge model, and the final answer is verified for hallucination — all inside a stateful LangGraph workflow. Multi-turn conversation memory is persisted to PostgreSQL with automatic summarisation compaction.
+
+> **Zero framework bloat for core retrieval.** Chunking, cosine similarity, hybrid search, and Reciprocal Rank Fusion are implemented in pure Python and SQL — no LangChain or LlamaIndex wrappers.
 
 ---
 
-## ⚙️ Directory Structure
+## Key Features
+
+| Feature | Details |
+|---|---|
+| **Native LLM Tool Calling** | The `agent_node` sends the OpenAI-compatible `search_pdf_database` tool schema to the LLM. The LLM decides autonomously whether to call the database or answer directly from memory. |
+| **Hybrid Search (pgvector + FTS)** | Dense cosine similarity search (`pgvector` `<=>`) fused with PostgreSQL Full-Text Search (`ts_rank`, `websearch_to_tsquery`) in a single ranked list. |
+| **Reciprocal Rank Fusion (RRF)** | Mathematically fuses vector and keyword rankings without hand-tuned weights: $RRF(d) = \sum_{r \in R} \frac{1}{60 + r(d)}$ |
+| **Two-Pass Re-ranking** | Pass 1 — lightweight keyword overlap lexical rescoring. Pass 2 (optional) — LLM-as-a-Judge evaluates all candidates and returns a best-first ranking. |
+| **Self-Correcting Graph** | LangGraph loop: retrieve → grade relevance → rewrite query on failure → select context → answer → verify factuality. |
+| **Multi-Turn Chat Memory** | Per-session message history (last 20 turns) and a running summary of older turns, both persisted to Neon PostgreSQL. |
+| **Automatic Summary Compaction** | After 10 messages, a background task prompts an LLM to merge the latest turn into a ≤3-sentence running summary, preventing prompt overflow. |
+| **FastAPI REST Service** | Full document lifecycle (upload, list, delete) and a full chat session lifecycle (query, list sessions, delete session, view history). |
+| **Observability** | Structured JSON logging via `structlog` and optional LangSmith tracing for all LLM completions. |
+
+---
+
+## Architecture
+
+### Agentic LangGraph Flow (Current)
+
+```
+POST /chat/query
+      │
+      ▼
+[agent_node] ─── has answer? ──► [check_hallucination] ──► END
+      │ needs tool call
+      ▼
+[execute_tool_node]
+      │
+      ├── use_llm_rerank=True? ──► [llm_rerank_node]
+      │                                    │
+      ▼                                    ▼
+[grade_documents_node] ◄────────────────────
+      │
+      ├── relevant?   ──► [select_context_node] ──► [agent_node]  (loop back)
+      ├── can retry?  ──► [rewrite_query_node]  ──► [execute_tool_node]
+      └── exhausted   ──► [no_context_node]     ──► END
+```
+
+**Node Summary:**
+
+| Node | Role |
+|---|---|
+| `agent_node` | Calls LLM with tool schema; answers directly or requests a database search. Receives chat history + running summary. |
+| `execute_tool_node` | Embeds the search query, runs hybrid search (vector + keyword, fused via RRF), applies lexical reranking (Pass 1). |
+| `llm_rerank_node` | Optional Pass 2 re-ranking: an LLM judge scores all candidate chunks and returns them in best-first order. |
+| `grade_documents_node` | A lightweight judge LLM grades each candidate chunk as relevant / not relevant to the user's question. |
+| `rewrite_query_node` | If no relevant chunks found, an LLM rewrites the query into keyword-style search terms before retrying. |
+| `select_context_node` | Trims selected chunks to fit within `MAX_CONTEXT_CHARS` and `ANSWER_K` budget before passing to the LLM. |
+| `check_hallucination_node` | A verifier LLM checks if the generated answer is grounded in retrieved facts; prepends a warning if not. |
+| `no_context_node` | Returns a helpful fallback message when all retries are exhausted without finding relevant context. |
+
+---
+
+## Directory Structure
 
 ```
 test_rag/
 │
-├── api.py                    ← FastAPI Web Application Entry Point
-├── dependencies.py           ← FastAPI dependency injection mapping
-├── schemas.py                ← Pydantic API validation schemas
-├── render.yaml               ← Deployment config for render.com Web Service
-├── requirements.txt          ← System dependencies (local & Render)
+├── api.py                      ← FastAPI application entry point, router registration
+├── dependencies.py             ← FastAPI dependency injection (NeonVectorStore, IngestService)
+├── schemas.py                  ← Pydantic request/response schemas (all API I/O contracts)
+├── render.yaml                 ← Render.com deployment blueprint
+├── requirements.txt            ← Python dependencies
 │
 ├── config/
-│   ├── __init__.py           ← Settings / configuration loader
-│   └── openrouter_settings.py← OpenRouter LLM and embed models configuration
-│
-├── routes/
-│   ├── health.py             ← Health status check with live database ping
-│   ├── documents.py          ← File uploading, listing, and deletion endpoints
-│   └── chat.py               ← Querying and generating answers via LangGraph
-│
-├── services/
-│   ├── __init__.py           
-│   ├── agent_completion.py   ← OpenRouter API completion and grading caller
-│   ├── graph_services.py     ← Service wrapper for query execution via LangGraph
-│   └── ingest_service.py     ← PDF loading, chunking, embedding & vector DB insertion
+│   ├── __init__.py             ← Application settings (SEARCH_K, ANSWER_K, MIN_SCORE, etc.)
+│   └── openrouter_settings.py  ← OpenRouter client, model enums, router config
 │
 ├── core/
-│   ├── __init__.py           
-│   ├── chunking.py           ← Recursive paragraph/sentence/word chunker
-│   ├── document_loader.py    ← pypdf loader with page offset mapping
-│   ├── embeddings.py         ← OpenRouter embedding client
-│   ├── models.py             ← Return structures (RetrievalResult, ChatResult, etc.)
-│   ├── rag_engine.py         ← Prompt builders, RAG context compilers, and lexical reranker
-│   └── vector_store.py       ← Neon PostgreSQL connection and FTS + pgvector hybrid search
-│
-├── crew/
-│   ├── __init__.py           
-│   ├── crews/
-│   │   ├── __init__.py       
-│   │   └── rag_crew.py       ← Multi-agent RAG workflow (Retriever, Synthesizer, Verifier)
-│   └── tools/
-│       ├── __init__.py       
-│       └── rag_tool.py       ← Custom RAG search tool utilizing the database
+│   ├── chunking.py             ← RecursiveChunk: paragraph → sentence → sliding-word-window splitter
+│   ├── document_loader.py      ← PDF page extraction with page-offset metadata (pypdf)
+│   ├── embeddings.py           ← OpenRouterEmbeddingClient with automatic model fallback
+│   ├── models.py               ← Dataclass DTOs: RetrievalResult, IngestResult, ChatResult
+│   ├── rag_engine.py           ← Cosine similarity, context builder, lexical reranker, tool schema
+│   ├── vector_store.py         ← NeonVectorStore: vector search, keyword search, hybrid RRF search
+│   └── chat_history_store.py   ← ChatHistoryStore: per-session message history + summary persistence
 │
 ├── graph/
-│   ├── __init__.py           
-│   └── rag_graph.py          ← LangGraph StateGraph routing nodes (retrieve, rerank, grading, answer)
+│   └── rag_graph.py            ← LangGraph StateGraph: all nodes, routing functions, compiled graph
+│
+├── routes/
+│   ├── health.py               ← GET /health — live database ping
+│   ├── documents.py            ← POST /documents/upload, GET /documents, DELETE /documents/{id}
+│   └── chat.py                 ← POST /chat/query, GET/DELETE /chat/sessions/*
+│
+├── services/
+│   ├── agent_completion.py     ← agent_complete(): unified LLM call wrapper (model selection, logging)
+│   ├── graph_services.py       ← GraphService: translates API request → RAGState → ChatResult
+│   ├── ingest_service.py       ← IngestService: load PDF → chunk → embed → store to Neon
+│   └── compaction_service.py   ← save_and_compact_workflow(): background history save + summarisation
+│
+├── crew/
+│   ├── crews/rag_crew.py       ← CrewAI multi-agent team (Retriever, Synthesizer, Verifier) — CLI only
+│   └── tools/rag_tool.py       ← Custom CrewAI search tool backed by the RAG graph
 │
 ├── scripts/
-│   ├── crew_runner.py        ← Script to kickoff the CrewAI RAG agent
-│   ├── compare_retrieval.py  ← Script to compare Keyword vs Vector vs Hybrid (RRF) search
-│   ├── test_hybrid_search.py ← Script to smoke-test RRF retrieval
-│   └── test_keyword_search.py← Script to smoke-test PostgreSQL keyword search
+│   ├── test_full_pipeline.py   ← Python end-to-end test runner (all endpoints)
+│   └── test_api.sh             ← Bash/curl test suite (all endpoints)
 │
 ├── data/
-│   └── sample.pdf            ← PDF file used for testing
+│   └── sample.pdf              ← Sample PDF for local testing
 │
 └── docs/
-    └── project_flow.md       ← Full Mermaid diagrams
+    └── project_flow.md         ← Extended Mermaid flow diagrams
 ```
 
 ---
 
-## 📸 Architectural Visuals
+## Database Schema
 
-Detailed diagrams showing how data flows through the application (see [docs/project_flow.md](docs/project_flow.md) for full-res versions):
+```sql
+-- Document registry
+CREATE TABLE documents (
+    id         SERIAL PRIMARY KEY,
+    file_name  TEXT NOT NULL,
+    summary    TEXT DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
-### 1. Ingesting a PDF (API Flow)
-```mermaid
-flowchart TD
-    A["POST /documents/upload"] --> B["routes/documents.py (upload_file)"]
-    B --> C["IngestService.ingest_pdf()"]
-    
-    C --> D["DocumentLoader.load_pdf_pages()"]
-    D --> E["list of {page_number, text}"]
-    
-    E --> F["RecursiveChunk.chunk() per page"]
-    F --> F1{"Paragraph fits?"}
-    F1 -- Yes --> F2["Keep as chunk"]
-    F1 -- No --> F3{"Sentence fits?"}
-    F3 -- Yes --> F4["Keep as chunk"]
-    F3 -- No --> F5["chunk_by_words(max_words=40, overlap=5)"]
-    
-    F2 & F4 & F5 --> G["all_chunks + page_numbers"]
-    
-    G --> H["RAGEngine.embed_chunks()"]
-    H --> H1["OpenRouterEmbeddingClient.embed_documents()"]
-    H1 --> H2["OpenRouter API → embedding vectors"]
-    
-    H2 --> I["NeonVectorStore.create_document()"]
-    I --> I1["INSERT INTO documents → DOCUMENT_ID"]
-    
-    I1 --> J["NeonVectorStore.insert_chunks()"]
-    J --> J1["INSERT INTO document_chunks
-(DOCUMENT_ID, chunk_index, chunk_text, embedding, page_number)"]
-    
-    J1 --> K["Returns IngestResult
-(DOCUMENT_ID, file_name, page_count, chunk_count)"]
+-- Vector store — one row per text chunk
+CREATE TABLE document_chunks (
+    id          SERIAL PRIMARY KEY,
+    document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL,
+    chunk_text  TEXT NOT NULL,
+    embedding   VECTOR(1536),
+    page_number INTEGER
+);
 
-    style A fill:#2a9d8f,color:#fff
-    style B fill:#264653,color:#fff
-    style K fill:#1b4332,color:#fff
-    style H2 fill:#e76f51,color:#fff
-    style I1 fill:#264653,color:#fff
-    style J1 fill:#264653,color:#fff
+-- Multi-turn chat history
+CREATE TABLE chat_messages (
+    id         SERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    role       TEXT NOT NULL,   -- 'user' | 'assistant'
+    content    TEXT NOT NULL,
+    metadata   JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Running conversation summaries (one row per session)
+CREATE TABLE chat_summaries (
+    session_id   TEXT PRIMARY KEY,
+    summary_text TEXT NOT NULL,
+    updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
 ```
-
-### 2. Chatting with a PDF (API Query Flow via LangGraph)
-```mermaid
-flowchart TD
-    A["POST /chat/query"] --> B["routes/chat.py (query_pdf_graph)"]
-    B --> C["GraphService.ask_pdf_with_graph()"]
-    
-    C --> D["rag_graph.invoke()"]
-    D --> E["Retrieve Node → Grade Node → Answer Node"]
-    E --> J["Returns ChatResult
-(answer, sources)"]
-    J --> K["routes/chat.py returns QueryResponse JSON"]
-
-    style A fill:#2a9d8f,color:#fff
-    style B fill:#264653,color:#fff
-    style D fill:#e76f51,color:#fff
-    style E fill:#264653,color:#fff
-    style J fill:#1b4332,color:#fff
-```
-
-### 3. Web API Routing & Services
-```mermaid
-flowchart TD
-    subgraph Client["HTTP Clients (Postman/Curl/Frontend)"]
-        C1["POST /documents/upload"]
-        C2["POST /chat/query"]
-    end
-
-    subgraph API["FastAPI Layer"]
-        R_DOC["routes/documents.py (upload_file)"]
-        R_CHAT["routes/chat.py (query_pdf_graph)"]
-    end
-
-    subgraph DI["Dependency Injection"]
-        D1["dependencies.py"]
-    end
-
-    subgraph Services["Service Layer"]
-        IS["IngestService.ingest_pdf()"]
-        GS["GraphService.ask_pdf_with_graph()"]
-    end
-
-    C1 --> R_DOC
-    C2 --> R_CHAT
-
-    R_DOC -.->|Depends| D1
-    
-    D1 -->|Injects| IS
-
-    IS -->|Returns IngestResult| R_DOC
-    R_CHAT -->|Calls directly| GS
-    GS -->|Returns ChatResult| R_CHAT
-
-    R_DOC -->|Returns UploadResponse| C1
-    R_CHAT -->|Returns QueryResponse| C2
-
-    style C1 fill:#2a9d8f,color:#fff
-    style C2 fill:#2a9d8f,color:#fff
-    style R_DOC fill:#264653,color:#fff
-    style R_CHAT fill:#264653,color:#fff
-    style IS fill:#e76f51,color:#fff
-    style GS fill:#e76f51,color:#fff
-```
-
-### 4. CrewAI Collaborative Team Flow
-```mermaid
-flowchart TD
-    A["scripts/crew_runner.py"] --> B["rag_crew.kickoff()"]
-
-    subgraph Crew["CrewAI Team Orcherstration"]
-        AG1["Document Retriever Agent"]
-        AG2["Answer Synthesizer Agent"]
-        AG3["Answer Verifier Agent"]
-        
-        T1["Task 1: Search PDF via custom RAG Tool"]
-        T2["Task 2: Grounded QA Synthesis"]
-        T3["Task 3: Fact Verification & Correction"]
-    end
-
-    B --> T1
-    AG1 -->|Executes| T1
-    T1 -->|Uses custom search_pdf tool| TL["crew/tools/rag_tool.py"]
-    TL -->|Queries| GS["GraphService.ask_pdf_with_graph()"]
-    
-    T1 -->|Outputs Chunks| T2
-    AG2 -->|Executes| T2
-    
-    T2 -->|Outputs Draft Answer| T3
-    AG3 -->|Executes| T3
-    T3 -->|Context checks| T1
-    
-    T3 -->|Returns Grounded Answer| C["Final Output Answer"]
-
-    style A fill:#2d6a4f,color:#fff
-    style GS fill:#e76f51,color:#fff
-    style C fill:#1b4332,color:#fff
-    style TL fill:#264653,color:#fff
-```
-
-### 5. LangGraph Self-Correcting Flow (Level 9)
-```mermaid
-flowchart TD
-    A["graph/rag_graph.py (invoke)"] --> START["START"]
-
-    START --> RET["retrieve_node"]
-
-    RET --> GRADE["grade_documents_node
-(LLM grades context)"]
-    GRADE --> COND1{"route_after_grading"}
-
-    COND1 -->|has_context| SEL["select_context_node"]
-    COND1 -->|retry_count < max| REW["rewrite_query_node
-(Expands search)"]
-    COND1 -->|no retries left| NO_CTX["no_context_node"]
-
-    REW --> RET
-
-    SEL --> COND2{"route_after_select"}
-    COND2 -->|has_context| ANS["answer_node
-(LLM drafts answer)"]
-    COND2 -->|no_context| NO_CTX
-
-    ANS --> HALLUC["check_hallucination_node
-(LLM verifies factuality)"]
-
-    HALLUC --> END1["END (Return: Verified Answer)"]
-    NO_CTX --> END2["END (Return: No relevant info)"]
-
-    style A fill:#2d6a4f,color:#fff
-    style GRADE fill:#e76f51,color:#fff
-    style REW fill:#e76f51,color:#fff
-    style HALLUC fill:#e76f51,color:#fff
-    style END1 fill:#1b4332,color:#fff
-    style END2 fill:#9b2226,color:#fff
-```
-
-### 🧠 Why LangGraph? (The Self-Correcting Architecture)
-Standard RAG systems blindly retrieve documents and pass them to an LLM, leading to hallucinations if the context is poor. By using **LangGraph**, this service acts autonomously:
-1. **Grading**: It explicitly asks a lightweight LLM-as-a-Judge if the retrieved chunks actually answer the question.
-2. **Self-Correction**: If the grade is poor, it automatically rewrites the query and tries again.
-3. **Hallucination Prevention**: Before returning the final answer, a strict "Verifier" LLM cross-references the answer against the retrieved chunks. If it detects a hallucination, it flags it.
 
 ---
 
-## 🏗️ Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| **API Framework** | FastAPI (with Pydantic schemas) |
-| **Agentic Frameworks**| CrewAI & LangGraph |
-| **LLM API** | OpenRouter (`openrouter.ai`) |
+| **API Framework** | FastAPI + Pydantic v2 |
+| **Agentic Workflow** | LangGraph (`StateGraph`) |
+| **LLM API** | OpenRouter (`openrouter.ai`) via OpenAI SDK |
 | **Embeddings** | `openai/text-embedding-3-small` via OpenRouter |
-| **Vector DB** | Neon Serverless PostgreSQL |
-| **Vector Search** | `pgvector` (Cosine Similarity `<=>`) |
-| **Sparse Keyword Search**| PostgreSQL Full-Text Search (`ts_rank`, `websearch_to_tsquery`) |
-| **PDF Ingestion** | `pypdf` |
-| **Database Driver** | `psycopg` (v3) |
-| **Hosting Platform** | Render |
+| **Vector Database** | Neon Serverless PostgreSQL + `pgvector` |
+| **Vector Search** | `pgvector` cosine distance (`<=>`) |
+| **Keyword Search** | PostgreSQL Full-Text Search (`ts_rank`, `websearch_to_tsquery`) |
+| **PDF Extraction** | `pypdf` |
+| **Database Driver** | `psycopg` v3 (psycopg3) |
+| **Logging** | `structlog` (structured JSON) |
+| **Observability** | LangSmith (optional tracing) |
+| **Multi-Agent CLI** | CrewAI |
+| **Deployment** | Render Web Service (`render.yaml`) |
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
-### 1. Installation
+### 1. Clone and Install
 
-Clone the repository and set up a virtual environment:
 ```bash
 git clone https://github.com/hasnatsakil/agentic-rag-service.git
 cd agentic-rag-service
@@ -306,107 +196,300 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment Variables
+### 2. Environment Variables
 
-Create a `.env` file in the root directory:
+Create a `.env` file at the project root:
+
 ```env
-# OpenRouter API Configuration
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-
-# Neon Vector database (PostgreSQL + pgvector)
+# Required
+OPENROUTER_API_KEY=your_openrouter_api_key
 DATABASE_URL=postgresql://user:password@ep-cool-db.region.aws.neon.tech/dbname
 
-# Optional: LangSmith Tracing & Observability
-LANGSMITH_API_KEY=your_langsmith_api_key_here
+# Optional — LangSmith tracing
+LANGSMITH_API_KEY=your_langsmith_api_key
 LANGSMITH_TRACING=true
 LANGSMITH_PROJECT=agentic-rag-service
 ```
 
----
+### 3. Run the API Server
 
-## 💻 Running the Services
-
-### Option A: Start the FastAPI Web Server
 ```bash
 uvicorn api:app --reload
 ```
 
-### Option B: Run the CrewAI Multi-Agent RAG Runner
-```bash
-python scripts/crew_runner.py
-```
-
-### Option C: Run the LangGraph Stateful Pipeline (CLI Interface)
-```bash
-python graph/rag_graph.py
-```
+Browse the interactive Swagger UI at **`http://127.0.0.1:8000/docs`**.
 
 ---
 
-## 🔌 API Reference
+## Testing
 
-### 1. Interactive Testing (Swagger UI)
-Once the FastAPI server is running, open your browser and go to:
-👉 **`http://127.0.0.1:8000/docs`**
+Two test scripts in `scripts/` validate the full pipeline from the terminal. Both test every endpoint in order, verify response payloads, and clean up after themselves.
 
-Here you can click **"Try it out"** to upload files, list documents, and send queries directly from the UI.
+Start the API server first:
+```bash
+uvicorn api:app --reload
+```
 
-### 2. Programmatic Integration (Usage Example)
-You can call the endpoints from any frontend (React, Flutter) or script using standard HTTP requests. 
+### Option A — Python runner (recommended)
 
-**Usage example (Python `requests`):**
-```python
-import requests
+```bash
+python scripts/test_full_pipeline.py
+python scripts/test_full_pipeline.py --base-url https://your-service.onrender.com
+```
 
-BASE_URL = "https://your-render-url.com" # or http://127.0.0.1:8000
+### Option B — Bash/curl suite
 
-# 1. Upload a PDF
-with open("sample.pdf", "rb") as f:
-    upload_res = requests.post(f"{BASE_URL}/documents/upload", files={"file": f})
-    
-DOCUMENT_ID = upload_res.json()["document_id"]
-print(f"Uploaded successfully. Document ID: {DOCUMENT_ID}")
+```bash
+bash scripts/test_api.sh
+bash scripts/test_api.sh https://your-service.onrender.com
+```
 
-# 2. Ask a question about the PDF
-payload = {
-    "DOCUMENT_ID": DOCUMENT_ID,
-    "question": "What is the main conclusion of this document?",
-    "use_llm_rerank": True  # Enable Pass 2 LLM Re-ranking!
+### What both scripts verify
+
+| Step | Endpoint | Verified |
+|---|---|---|
+| 1 | `GET /health` | Server up, DB connected |
+| 2 | `POST /documents/upload` | PDF ingested, document ID returned |
+| 3 | `GET /documents` | Document appears in list |
+| 4 | `POST /chat/query` (turn 1) | Answer, sources, debug metrics |
+| 5 | `POST /chat/query` (turn 2) | Session memory carries over |
+| 6 | `GET /chat/sessions` | Test session visible |
+| 7 | `GET /chat/sessions/{id}/messages` | 4 messages persisted |
+| 8 | `DELETE /documents/99999` | 404 for unknown document |
+| C | `DELETE /chat/sessions/{id}` | Session cleaned up |
+| C | `DELETE /documents/{id}` | Document cleaned up |
+
+---
+
+## API Reference
+
+### Document Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/documents/upload` | Upload a PDF; extract, chunk, embed, and store all pages. |
+| `GET` | `/documents` | List all indexed documents (id, filename, created_at). |
+| `DELETE` | `/documents/{id}` | Remove a document and all its vector chunks (cascade). |
+
+### Chat Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/chat/query` | Submit a question; get an LLM answer with source citations and debug metrics. |
+| `GET` | `/chat/sessions` | List all chat sessions with their latest activity timestamp. |
+| `GET` | `/chat/sessions/{session_id}/messages` | Retrieve the full chronological message log of a session. |
+| `DELETE` | `/chat/sessions/{session_id}` | Delete all messages and summary for a session. |
+
+### Other
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Health check — pings the database and returns server status. |
+
+---
+
+### Chat Query Request Body (`POST /chat/query`)
+
+```json
+{
+  "session_id": "my-chat-thread-1",
+  "question": "What are the visa requirements for international students?",
+  "SEARCH_K": 15,
+  "GRADE_K": 6,
+  "ANSWER_K": 3,
+  "MIN_SCORE": 0.0,
+  "MAX_CONTEXT_CHARS": 3000,
+  "use_llm_rerank": false
 }
-chat_res = requests.post(f"{BASE_URL}/chat/query", json=payload)
-
-print("
---- Answer ---")
-print(chat_res.json()["answer"])
-print(f"Latency: {chat_res.json()['process_time_ms']} ms")
 ```
 
-### Available Endpoints
-* **`POST /documents/upload`** — Uploads and vectorizes a `.pdf` file.
-* **`GET /documents`** — Lists all indexed documents.
-* **`DELETE /documents/{DOCUMENT_ID}`** — Removes a document and its vectors.
-* **`POST /chat/query`** — Performs hybrid similarity search, optional re-ranking, and generates an LLM answer.
-* **`GET /health`** — Pinger endpoint to check server status.
+| Field | Type | Description |
+|---|---|---|
+| `session_id` | `str` | Unique session string. History and summary are fetched/saved against this key. |
+| `question` | `str` | The user's natural-language question. |
+| `SEARCH_K` | `int` | Candidate chunks fetched from the vector store per search attempt. |
+| `GRADE_K` | `int` | How many top candidates the relevance grader will evaluate. |
+| `ANSWER_K` | `int` | Maximum chunks forwarded to the LLM for answer generation. |
+| `MIN_SCORE` | `float` | Retrieval score threshold; chunks below this are discarded. |
+| `MAX_CONTEXT_CHARS` | `int` | Hard cap on total context characters sent to the LLM. |
+| `use_llm_rerank` | `bool` | Enable Pass 2 LLM-as-a-Judge re-ranking before grading. |
+
+### Chat Query Response Body
+
+```json
+{
+  "answer": "International students require a Single Entry Visa...",
+  "sources": [
+    {
+      "label": "Page 3, Chunk 7",
+      "score": 0.048,
+      "chunk_id": 6,
+      "page_number": 3,
+      "chunk_text": "Malaysia removed quarantine for fully vaccinated..."
+    }
+  ],
+  "process_time_ms": 4821.5,
+  "debug": {
+    "used_rewrite": false,
+    "is_grounded": true,
+    "retrieval_count": 12,
+    "selected_count": 3
+  }
+}
+```
 
 ---
 
-## ☁️ Deploying on Render
+## Data Flow Diagrams
 
-This repository is pre-configured for deployment as a Render **Web Service** using the included `render.yaml` configuration.
+### 1. PDF Ingestion Flow
 
-### Deploy Steps:
-1. Push your code to your GitHub repository.
-2. Log into [Render](https://render.com).
-3. Click **New** -> **Blueprint**.
-4. Connect this repository. Render will automatically read the `render.yaml` file.
-5. In the Render Dashboard, fill in your Secret Environment Variables:
+```mermaid
+flowchart TD
+    A["POST /documents/upload"] --> B["routes/documents.py"]
+    B --> C["IngestService.ingest_pdf()"]
+
+    C --> D["DocumentLoader.load_pdf_pages()"]
+    D --> E["list of {page_number, text}"]
+
+    E --> F["RecursiveChunk.chunk() per page"]
+    F --> F1{"Paragraph fits ≤ max_words?"}
+    F1 -- Yes --> F2["Keep paragraph as chunk"]
+    F1 -- No --> F3{"Sentence fits?"}
+    F3 -- Yes --> F4["Keep sentence as chunk"]
+    F3 -- No --> F5["chunk_by_words(sliding window, overlap)"]
+
+    F2 & F4 & F5 --> G["all_chunks + page_numbers"]
+
+    G --> H["RAGEngine.embed_chunks()"]
+    H --> H1["OpenRouterEmbeddingClient (auto-fallback)"]
+    H1 --> H2["OpenRouter API → embedding vectors [1536d]"]
+
+    H2 --> I["NeonVectorStore.create_document()"]
+    I --> I1["INSERT INTO documents → document_id"]
+    I1 --> J["NeonVectorStore.insert_chunks()"]
+    J --> J1["INSERT INTO document_chunks (chunk_text, embedding, page_number)"]
+    J1 --> K["Returns IngestResult (id, file_name, page_count, chunk_count)"]
+
+    style A fill:#2a9d8f,color:#fff
+    style K fill:#1b4332,color:#fff
+    style H2 fill:#e76f51,color:#fff
+```
+
+### 2. Agentic Chat Query Flow
+
+```mermaid
+flowchart TD
+    A["POST /chat/query"] --> B["routes/chat.py"]
+    B --> B1["ChatHistoryStore.get_last_20_message()"]
+    B --> B2["ChatHistoryStore.get_summary()"]
+    B1 & B2 --> C["GraphService.ask_pdf_with_graph()"]
+    C --> D["rag_graph.invoke(RAGState)"]
+
+    D --> AGENT["agent_node: LLM + tool schema\n(receives history + summary + doc catalog)"]
+    AGENT -- "tool call" --> TOOL["execute_tool_node:\nhybrid_search + Pass 1 rerank"]
+    AGENT -- "direct answer" --> HALL["check_hallucination_node"]
+
+    TOOL --> OPT{"use_llm_rerank?"}
+    OPT -- Yes --> LLM_R["llm_rerank_node:\nLLM judge reorders chunks"]
+    OPT -- No --> GRADE
+    LLM_R --> GRADE["grade_documents_node:\njudge each chunk yes/no"]
+
+    GRADE -- "relevant" --> SEL["select_context_node:\ntrim to ANSWER_K / MAX_CONTEXT_CHARS"]
+    GRADE -- "retry budget left" --> REW["rewrite_query_node:\nLLM rewrites query"]
+    GRADE -- "exhausted" --> NO["no_context_node"]
+
+    REW --> TOOL
+    SEL --> AGENT
+    AGENT -- "now has context, answers" --> HALL
+    HALL --> END["END: ChatResult"]
+    NO --> END
+
+    END --> E["BackgroundTask: save_and_compact_workflow()"]
+    E --> E1["ChatHistoryStore.save_message() ×2"]
+    E --> E2["LLM updates running summary → ChatHistoryStore.update_summary()"]
+    END --> F["Returns QueryResponse JSON"]
+
+    style A fill:#2a9d8f,color:#fff
+    style END fill:#1b4332,color:#fff
+    style HALL fill:#e76f51,color:#fff
+    style GRADE fill:#e76f51,color:#fff
+    style LLM_R fill:#e76f51,color:#fff
+    style REW fill:#e76f51,color:#fff
+```
+
+### 3. Hybrid Search & Re-ranking Detail
+
+```mermaid
+flowchart TD
+    Q["search_question (from agent tool call)"] --> EMB["embed_query()"]
+    EMB --> VS["NeonVectorStore.similarity_search()\npgvector cosine distance <=>"]
+    Q --> KS["NeonVectorStore.keyword_search()\nts_rank + websearch_to_tsquery"]
+    VS & KS --> RRF["Reciprocal Rank Fusion\nRRF(d) = Σ 1/(60 + rank)"]
+    RRF --> P1["RAGEngine.rerank_results()\nPass 1: keyword overlap boost"]
+    P1 --> FILTER["Filter by MIN_SCORE"]
+    FILTER --> OPT{"use_llm_rerank?"}
+    OPT -- Yes --> P2["llm_rerank_node\nPass 2: LLM judge best-first ordering"]
+    OPT -- No --> GRADE_IN["grade_documents_node"]
+    P2 --> GRADE_IN
+
+    style RRF fill:#264653,color:#fff
+    style P1 fill:#457b9d,color:#fff
+    style P2 fill:#e76f51,color:#fff
+```
+
+### 4. Multi-Turn Memory Architecture
+
+```mermaid
+flowchart TD
+    subgraph Per Request
+        R["POST /chat/query\n(session_id, question)"] --> HS["ChatHistoryStore:\nget_last_20_message()"]
+        R --> SS["ChatHistoryStore:\nget_summary()"]
+        HS & SS --> GS["GraphService → RAGState\n(history: list[dict], summary: str)"]
+        GS --> AG["agent_node receives:\n• history (last 20 turns)\n• summary (older turns)\n• doc catalog"]
+    end
+
+    subgraph Background after response
+        BG["save_and_compact_workflow()"] --> SM["save_message(user + assistant)"]
+        BG --> CHK{"history count >= 10?"}
+        CHK -- Yes --> LLM_S["LLM: merge latest turn\ninto running summary (≤3 sentences)"]
+        LLM_S --> US["update_summary(session_id, new_summary)"]
+        CHK -- No --> SKIP["Skip summary update"]
+    end
+
+    style AG fill:#264653,color:#fff
+    style LLM_S fill:#e76f51,color:#fff
+```
+
+---
+
+## Why LangGraph? The Self-Correcting Architecture
+
+Standard RAG systems blindly retrieve documents and pass them to the LLM, producing hallucinations when the context is poor. This service uses a stateful graph where:
+
+1. **Native Tool Calling** — The LLM autonomously decides whether to query the database or answer from memory/history. It selects the correct document ID from the catalog on its own.
+2. **LLM Grading** — A judge model evaluates each retrieved chunk independently and filters out irrelevant content before the answer model sees it.
+3. **Self-Correction** — If grading fails, an LLM rewrites the query into keyword-style search terms and retries retrieval automatically.
+4. **Hallucination Prevention** — A verifier model cross-references the final answer against the retrieved facts. An ungrounded answer gets a prepended warning rather than being silently returned.
+5. **Persistent Memory** — Session history and compact summaries are stored in PostgreSQL, so the agent remembers past interactions across API requests.
+
+---
+
+## Deployment (Render)
+
+The repository includes a `render.yaml` blueprint for one-click deployment:
+
+1. Push to GitHub.
+2. Log into [Render](https://render.com) → **New → Blueprint**.
+3. Connect the repository; Render reads `render.yaml` automatically.
+4. Add secret environment variables in the Render dashboard:
    - `OPENROUTER_API_KEY`
    - `DATABASE_URL`
-   - `LANGSMITH_API_KEY` (optional)
-6. Click **Deploy**. The API service will build and start up automatically on Render.
+   - `LANGSMITH_API_KEY` *(optional)*
+5. Click **Deploy**.
 
 ---
 
-## 📜 License
+## License
 
 MIT

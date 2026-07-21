@@ -32,13 +32,15 @@ class GraphService:
     @staticmethod
     def ask_pdf_with_graph(
         question: str,
-        DOCUMENT_ID: int,
         SEARCH_K: int = settings.SEARCH_K,
         GRADE_K:int = settings.GRADE_K,
         ANSWER_K: int = settings.ANSWER_K,
         MIN_SCORE: float = settings.MIN_SCORE,
         MAX_CONTEXT_CHARS: int = settings.MAX_CONTEXT_CHARS,
         use_llm_rerank: bool = False,
+        available_documents: list[dict] = None,
+        history: list[dict] = None,
+        summary: str = "",
     ) -> ChatResult:
         """Run the full RAG graph pipeline for a user question.
 
@@ -49,19 +51,24 @@ class GraphService:
 
         Args:
             question: The user's natural-language question.
-            DOCUMENT_ID: ID of the document to query, as returned by
-                :meth:`~core.vector_store.NeonVectorStore.create_document`.
             SEARCH_K: Number of candidate chunks to retrieve from the vector
                 store before grading. Defaults to ``settings.SEARCH_K``.
+            GRADE_K: Number of top candidate chunks to send to the relevance grader.
+                Defaults to ``settings.GRADE_K``.
             ANSWER_K: Maximum number of chunks forwarded to the LLM for
                 answer generation after grading and context selection.
                 Defaults to ``settings.ANSWER_K``.
-            MIN_SCORE: Minimum retrieval score threshold.  Chunks scoring
+            MIN_SCORE: Minimum retrieval score threshold. Chunks scoring
                 below this value are discarded after retrieval.
                 Defaults to ``settings.MIN_SCORE``.
             MAX_CONTEXT_CHARS: Hard cap on total context characters sent to
-                the LLM.  Prevents prompt overflow. Defaults to
+                the LLM. Prevents prompt overflow. Defaults to
                 ``settings.MAX_CONTEXT_CHARS``.
+            use_llm_rerank: Whether to execute Pass 2 LLM-as-a-Judge re-ranking node.
+            available_documents: Catalog of indexed documents with IDs and summaries.
+            history: Recent chat messages for dialogue memory.
+            summary: Running summary string of past chat turns.
+
 
         Returns:
             A :class:`~core.models.ChatResult` containing:
@@ -84,7 +91,7 @@ class GraphService:
             {
                 "question": question,
                 "search_question": question,
-                "DOCUMENT_ID": DOCUMENT_ID,
+                "DOCUMENT_ID": 0,
                 "SEARCH_K": SEARCH_K,
                 "GRADE_K": GRADE_K,
                 "ANSWER_K": ANSWER_K,
@@ -101,6 +108,9 @@ class GraphService:
                 "used_rewrite": False,
                 "is_grounded": False,
                 "use_llm_rerank": use_llm_rerank,
+                "available_documents": available_documents or [],
+                "history": history or [],
+                "summary": summary or ""
             }
         )
 

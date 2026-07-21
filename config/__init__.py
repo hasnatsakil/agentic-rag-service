@@ -9,6 +9,8 @@ Attributes of :class:`Settings`:
     SEARCH_K (int): Number of candidate chunks retrieved from the vector
         store before grading. Higher values improve recall at the cost of
         more LLM grading calls.
+    GRADE_K (int): How many of the top retrieved candidates the relevance
+        grader will evaluate. Must be <= SEARCH_K.
     ANSWER_K (int): Maximum chunks forwarded to the LLM after grading and
         context selection. Controls prompt size.
     MIN_SCORE (float): Minimum retrieval score threshold. Chunks below this
@@ -31,7 +33,8 @@ class Settings:
     #: Candidate chunks to retrieve per query before grading.
     SEARCH_K: int = 15
 
-    GRADE_K = 6
+    #: Top candidates sent to the relevance grader; must be <= SEARCH_K.
+    GRADE_K: int = 6
 
     #: Top chunks forwarded to the LLM for answer generation.
     ANSWER_K: int = 3

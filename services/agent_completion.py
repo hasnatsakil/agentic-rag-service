@@ -30,13 +30,13 @@ logger = structlog.get_logger(__name__)
 # ------------------------------------------------------------------ #
 
 #: Default model used for standard answer generation.
-MODEL = RouterModel.MINIMAX25.value
+MODEL = RouterModel.STEP_3_5_FLASH.value
 
 #: Default model used for relevance grading (lightweight binary classifier).
-GRADE_MODEL = RouterGradingModel.LLAMA.value
+GRADE_MODEL = RouterGradingModel.NORTH_MINI.value
 
 #: Default model used for hallucination detection.
-HALLUCINATION_MODEL = RouterModel.QWEN3NEXT.value
+HALLUCINATION_MODEL = RouterGradingModel.NORTH_MINI.value
 
 
 def agent_complete(

@@ -24,16 +24,15 @@ from config import settings
 class QueryRequest(BaseModel):
     """Request body for the ``POST /chat/query`` endpoint.
 
-    All fields except ``question`` have defaults sourced from application
-    settings, so callers only need to provide the question and an optional
-    document ID override.
+    All fields except ``session_id`` and ``question`` have defaults sourced from application
+    settings, so callers only need to provide the question and session ID.
 
     Attributes:
-        DOCUMENT_ID (int): ID of the document to query. Defaults to
-            ``settings.DOCUMENT_ID``.
+        session_id (str): Unique session identifier for chat history tracking. Required.
         question (str): The user's natural-language question. Required.
         SEARCH_K (int): Number of candidate chunks to retrieve from the
             vector store before grading. Defaults to ``settings.SEARCH_K``.
+        GRADE_K (int): Number of top retrieved chunks to grade for relevance. Defaults to ``settings.GRADE_K``.
         ANSWER_K (int): Number of top-ranked chunks forwarded to the LLM
             for answer generation. Defaults to ``settings.ANSWER_K``.
         MIN_SCORE (float): Minimum retrieval score; chunks below this are
@@ -41,11 +40,12 @@ class QueryRequest(BaseModel):
         MAX_CONTEXT_CHARS (int): Maximum total characters of context sent
             to the LLM. Prevents prompt overflow. Defaults to
             ``settings.MAX_CONTEXT_CHARS``.
+        use_llm_rerank (bool): Whether to use a Pass 2 LLM-as-a-Judge node to rerank chunks before answering.
     """
 
-    DOCUMENT_ID: int = Field(
-        settings.DOCUMENT_ID,
-        description="The ID of the document to query. Change it based on your id",
+    session_id: str = Field(
+        ...,
+        description="Unique session identifier for chat history tracking",
     )
     question: str = Field(
         ...,
@@ -55,7 +55,7 @@ class QueryRequest(BaseModel):
         settings.SEARCH_K,
         description="Number of chunks to retrieve from vector store for context",
     )
-    GRADE_K:int = Field(
+    GRADE_K: int = Field(
         settings.GRADE_K,
         description="Number of top retrieved chunks to grade for relevance",
     )
@@ -73,7 +73,7 @@ class QueryRequest(BaseModel):
     )
     use_llm_rerank: bool = Field(
         False,
-        description="Wheather to use an LLM to rerank retrieved chunks before answering"
+        description="Whether to use an LLM to rerank retrieved chunks before answering"
     )
 
 
@@ -127,7 +127,17 @@ class SourceResponse(BaseModel):
     page_number: int | None
     chunk_text: str
 
+
 class QueryDebugResponse(BaseModel):
+    """Execution metrics and debug flags returned in the query response.
+
+    Attributes:
+        used_rewrite (bool): True if the query was expanded/rewritten during state graph execution.
+        is_grounded (bool): True if the answer passed the factual verifier grade.
+        retrieval_count (int): Number of chunks retrieved matching MIN_SCORE.
+        selected_count (int): Number of chunks selected for the LLM prompt.
+    """
+
     used_rewrite: bool
     is_grounded: bool
     retrieval_count: int
@@ -143,12 +153,14 @@ class QueryResponse(BaseModel):
             as context for the answer.
         process_time_ms (float): End-to-end request processing time in
             milliseconds, measured by the route handler.
+        debug (QueryDebugResponse): Debug metadata and metrics from graph execution.
     """
 
     answer: str
     sources: list[SourceResponse]
     process_time_ms: float
     debug: QueryDebugResponse
+
 
 
 class DocumentResponse(BaseModel):
