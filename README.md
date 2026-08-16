@@ -111,6 +111,7 @@ test_rag/
 │   └── tools/rag_tool.py       ← Custom CrewAI search tool backed by the RAG graph
 │
 ├── scripts/
+│   ├── cli_chat.py             ← Interactive terminal chat agent (session select, resume, RAG loop)
 │   ├── test_full_pipeline.py   ← Python end-to-end test runner (all endpoints)
 │   └── test_api.sh             ← Bash/curl test suite (all endpoints)
 │
@@ -218,6 +219,40 @@ uvicorn api:app --reload
 ```
 
 Browse the interactive Swagger UI at **`http://127.0.0.1:8000/docs`**.
+
+---
+
+## CLI Chat Agent
+
+Chat interactively with your ingested PDF documents directly from the terminal using the full LangGraph RAG pipeline.
+
+### Startup flow
+1. Lists all indexed documents in the database.
+2. Shows all active chat sessions — select a number to **resume**, or press Enter to **create new**.
+3. Enters the interactive prompt loop.
+
+```bash
+# Direct mode — no HTTP server required
+python scripts/cli_chat.py
+
+# API mode — connects to local uvicorn server
+python scripts/cli_chat.py --api
+
+# API mode — connects to live Render deployment
+python scripts/cli_chat.py --api --url https://agentic-rag-service.onrender.com
+```
+
+### In-chat commands
+
+| Command | Description |
+|---|---|
+| `/sessions` | List active sessions and switch/resume a thread |
+| `/history` | View the full message log of the current session |
+| `/docs` | List all indexed documents in the database |
+| `/rerank` | Toggle Pass 2 LLM-as-a-Judge re-ranking ON/OFF |
+| `/new` | Start a fresh new session thread |
+| `/help` | Display all available commands |
+| `exit` / `quit` | Exit the agent |
 
 ---
 
